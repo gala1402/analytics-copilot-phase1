@@ -1,46 +1,71 @@
 import json
 from openai import OpenAI
 
-CONF_SYSTEM = """
-You are a strict technical auditor. Grade the following analytics response on a scale of 0.0 to 1.0.
+# 1. SQL RUBRIC: Strict on correctness, lenient on style
+SQL_RUBRIC = """
+Evaluate the SQL code quality.
+- 1.0 (Perfect): Syntax is correct, uses actual table/column names from the prompt (if provided), and logic perfectly matches the question.
+- 0.8 (Good): Logically correct but might assume a column name if schema wasn't fully clear.
+- 0.5 (Weak): Generic SQL (e.g., SELECT * FROM table) that doesn't target the specific question.
+- 0.1 (Fail): Not SQL, or completely hallucinated schema when a schema was provided.
+"""
+
+# 2. ANALYSIS RUBRIC: Rewards specificity, punishes fluff
+ANALYSIS_RUBRIC = """
+Evaluate the analytical advice.
+- 1.0 (Excellent): Highly specific to the user's question. Defines exact metrics, segments, or hypothesis tests. If data is missing, it precisely identifies *what* data is needed to proceed.
+- 0.8 (Strong): Good strategic thinking (e.g., AARRR framework), but some recommendations are slightly generic.
+- 0.5 (Average): "Consultant Fluff" — generic advice like "improve retention" or "optimize marketing" without saying HOW.
+- 0.1 (Poor): Irrelevant to the specific question asked.
+"""
+
+SYSTEM_TEMPLATE = """
+You are an impartial technical judge. Score the AI's response based on how well it answers the User's Question.
 
 User Question: {question}
+Intent: {intent}
 AI Response: {output}
 
-Scoring Rubric:
-- 1.0: Perfect, definitive answer using actual data/SQL (no placeholders).
-- 0.9: Strong answer but relies on general strategic frameworks (AARRR, etc.).
-- 0.8: Good answer, but explicitly lists "Missing Information" or "Assumptions".
-- 0.5: Vague, generic advice that applies to any company (e.g., "Check churn metrics").
-- 0.1: Refusal to answer or completely unrelated.
+SCORING STANDARDS:
+{rubric}
 
-Rules:
-- If the response contains "Missing Information Needed" or similar bullet points, MAX SCORE is 0.85.
-- If the user asked for SQL but the response is just text (no code), MAX SCORE is 0.3.
-- Be harsh. Do not give 1.0 easily.
+INSTRUCTIONS:
+- **Be Unbiased:** Do not artificially cap scores. If an answer is the best possible answer given the limited context, it deserves a 0.9 or 1.0.
+- **Reward Honesty:** If the AI correctly lists "Missing Information" that is crucial for the answer, treat that as a POSITIVE (high quality), not a negative.
+- **Penalize Hallucination:** If the AI makes up data or column names that don't exist, score < 0.4.
 
-Return STRICT JSON:
-{{"confidence": 0.0, "rationale": "One sentence explanation"}}
-""".strip()
+Return STRICT JSON only:
+{{"confidence": 0.0, "rationale": "One specific reason for this score."}}
+"""
 
-def get_confidence(client: OpenAI, question: str, output: str) -> dict:
-    # We inject the specific Q and A into the system prompt structure
-    formatted_system_prompt = CONF_SYSTEM.format(
-        question=question, 
-        output=output[:4000] # Truncate to save tokens
+def get_confidence(client: OpenAI, question: str, output: str, intent: str) -> dict:
+    
+    # Select the rubric based on intent
+    if intent == "SQL_INVESTIGATION":
+        selected_rubric = SQL_RUBRIC
+    else:
+        # Business and Product share the "Analysis" rubric
+        selected_rubric = ANALYSIS_RUBRIC
+
+    formatted_prompt = SYSTEM_TEMPLATE.format(
+        question=question,
+        intent=intent,
+        output=output[:4000],
+        rubric=selected_rubric
     )
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a strict evaluator. Output JSON only."},
-            {"role": "user", "content": formatted_system_prompt},
+            {"role": "user", "content": formatted_prompt},
         ],
         temperature=0,
     )
+    
     raw = (resp.choices[0].message.content or "").strip()
     
-    # Handle markdown code blocks if the LLM wraps JSON in ```json ... ```
+    # Strip markdown if present
     if raw.startswith("```"):
         raw = raw.replace("```json", "").replace("```", "").strip()
 
