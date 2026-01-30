@@ -219,10 +219,9 @@ def run_pipeline(user_question: str):
             )
             output = resp.choices[0].message.content or ""
             
-            # --- UPDATED LINE BELOW ---
-            # Pass the user_question so the model can compare Q vs A
-            conf_result = get_confidence(client, user_question, output)
-            # --------------------------
+            # --- FIXED LINE BELOW (Added 'intent') ---
+            conf_result = get_confidence(client, user_question, output, intent)
+            # -----------------------------------------
             
             is_valid, feedback = validator(output)
             
