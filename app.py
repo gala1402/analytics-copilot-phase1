@@ -211,7 +211,7 @@ def run_pipeline(user_question: str):
             else:
                 continue
 
-            # API Call
+           # API Call
             resp = client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
@@ -219,8 +219,11 @@ def run_pipeline(user_question: str):
             )
             output = resp.choices[0].message.content or ""
             
-            # Confidence & Validation
-            conf_result = get_confidence(client, output)
+            # --- UPDATED LINE BELOW ---
+            # Pass the user_question so the model can compare Q vs A
+            conf_result = get_confidence(client, user_question, output)
+            # --------------------------
+            
             is_valid, feedback = validator(output)
             
             results[intent] = {
