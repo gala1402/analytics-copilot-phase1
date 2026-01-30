@@ -1,0 +1,5 @@
+﻿user_id,plan_type,signup_date,last_login_date,status,mrr
+101,Pro,1/1/2024,1/15/2024,churned,50
+102,Basic,1/2/2024,1/20/2024,active,10
+103,Pro,1/5/2024,1/25/2024,active,50
+104,Enterprise,1/10/2024,1/11/2024,churned,500

@@ -1,0 +1,11 @@
+# Ignore Streamlit secrets (Your API Keys)
+.streamlit/secrets.toml
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore virtual environments
+venv/
+.env
+.DS_Store
