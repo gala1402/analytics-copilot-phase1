@@ -300,10 +300,13 @@ if st.session_state.analysis_results:
             with c1:
                 # Confidence Meter
                 score = res["score"]
-                color = confidence_color(score)
                 label = confidence_label(score)
-                st.caption(f"Confidence Score: {label}")
+                
+                # UPDATED LINE: Shows "0.85 / 1.00 • High Confidence"
+                st.caption(f"Confidence Score: **{score:.2f} / 1.00** • {label}")
+                
                 st.progress(score)
+                
                 if score < CONFIDENCE_THRESHOLD:
                     st.warning(f"⚠️ Low Confidence: {res['rationale']}")
                 else:
