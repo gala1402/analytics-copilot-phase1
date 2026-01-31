@@ -197,15 +197,17 @@ def run_pipeline(user_question: str):
                 prompt = build_product_prompt(user_question, schema=schema, user_context=user_context)
                 validator = validate_product
             elif intent == SQL_INVESTIGATION:
-                if schema is None:
+                # FIX: Allow execution if user provided context (text schema), even if no CSV is uploaded.
+                if schema is None and not user_context:
                     results[intent] = {
-                        "output": "⚠️ **SQL skipped**: No dataset uploaded.",
+                        "output": "⚠️ **SQL skipped**: No dataset uploaded and no schema description provided.",
                         "score": 0.0,
                         "rationale": "Missing schema.",
                         "valid": False,
-                        "feedback": "Upload CSV to generate SQL."
+                        "feedback": "Upload CSV or describe your table schema in the chat."
                     }
                     continue
+                
                 prompt = build_sql_prompt(user_question, schema=schema, user_context=user_context)
                 validator = validate_sql
             else:
