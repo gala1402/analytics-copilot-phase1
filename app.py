@@ -183,6 +183,14 @@ def run_pipeline(user_question: str):
         if user_context:
             status.write("📝 Incorporating user context...")
 
+            # If the user provided schema details in the clarification, force-enable SQL.
+            sql_triggers = ["table", "column", "schema", "database", ".csv", "dataset"]
+            if any(trigger in user_context.lower() for trigger in sql_triggers):
+                from models import SQL_INVESTIGATION
+                if SQL_INVESTIGATION not in intents:
+                    status.write("💡 Detected schema details -> Activating SQL Agent.")
+                    intents.append(SQL_INVESTIGATION)
+
         # 3. Execution
         results = {}
         intent_conf_map = {}
