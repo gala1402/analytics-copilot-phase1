@@ -1,4 +1,5 @@
 from openai import OpenAI
+import json
 
 SYSTEM_PROMPT = """
 You are a Gatekeeper for a Data Analytics Copilot.
@@ -21,15 +22,17 @@ Output Format (JSON):
 """
 
 def check_ambiguity(client: OpenAI, question: str):
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": question},
-        ],
-        temperature=0,
-        response_format={"type": "json_object"}
-    )
-    
-    import json
-    return json.loads(resp.choices[0].message.content)
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"}
+        )
+        return json.loads(resp.choices[0].message.content)
+    except Exception:
+        # Fallback if JSON fails
+        return {"is_ambiguous": False, "clarifying_question": ""}
