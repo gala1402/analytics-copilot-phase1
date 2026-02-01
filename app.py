@@ -23,7 +23,7 @@ from validators.sql_validator import validate_sql
 # Page Config
 # ----------------------------
 st.set_page_config(
-    page_title="Your Analytics Assistant", 
+    page_title="Analytics Copilot", 
     page_icon="🧠",
     layout="wide"
 )
@@ -123,7 +123,7 @@ if "analysis_results" not in st.session_state:
 # ----------------------------
 # Main Input
 # ----------------------------
-st.title("Analytics Copilot")
+st.title("Your Analytics Assistant")
 st.caption("A multi-intent, schema-aware AI partner.")
 
 col1, col2 = st.columns([4, 1])
