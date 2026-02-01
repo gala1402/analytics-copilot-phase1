@@ -43,10 +43,10 @@ def confidence_label(conf: float) -> str:
 st.set_page_config(
     page_title="Analytics Copilot", 
     page_icon="🧠",
-    layout="wide"  # Use the full screen width
+    layout="wide"
 )
 
-# Custom CSS for cleaner look
+# Custom CSS for cleaner look (FIXED SYNTAX HERE)
 st.markdown("""
     <style>
     .stTextArea textarea {
@@ -62,4 +62,47 @@ st.markdown("""
         border-radius: 4px 4px 0px 0px;
         gap: 1px;
         padding-top: 10px;
-        padding-bottom: 10px
+        padding-bottom: 10px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
+# ----------------------------
+# Sidebar: Setup & Data
+# ----------------------------
+with st.sidebar:
+    st.title("🧠 Copilot Settings")
+    
+    # API Key Handling
+    api_key = st.secrets.get("OPENAI_API_KEY")
+    if not api_key:
+        import os
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            api_key = st.text_input("OpenAI API Key", type="password")
+            if not api_key:
+                st.warning("Please enter an API Key to proceed.")
+                st.stop()
+    
+    client = OpenAI(api_key=api_key)
+
+    st.divider()
+    
+    # File Uploader
+    st.subheader("📂 Data Context")
+    uploaded_file = st.file_uploader("Upload CSV (Optional)", type=["csv"])
+    
+    schema = None
+    df = None
+
+    if uploaded_file:
+        try:
+            df = load_csv(uploaded_file)
+            schema = summarize_df(df)
+            st.success(f"Loaded {len(df)} rows")
+            
+            with st.expander("View Data Preview"):
+                st.dataframe(df.head())
+            
+            with
