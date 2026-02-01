@@ -1,30 +1,31 @@
 import json
 from openai import OpenAI
 
-# 1. SCOPE DEFINITIONS (The "Job Descriptions")
+# 1. SCOPE DEFINITIONS
 SCOPE_DEFINITIONS = {
     "BUSINESS_STRATEGY": """
-    JOB: Provide decision framing, unit economics, KPI tradeoffs, and high-level strategy.
-    CONSTRAINT: Must NOT write SQL code. Must NOT do deep technical product work (funnels).
-    SUCCESS: A great answer is strategic, logical, and identifies the right levers (e.g., Pricing, Market Fit).
+    JOB: Provide specific strategic advice based on the user's stated constraints.
+    CONSTRAINT: Must NOT write SQL.
+    SUCCESS: Advice must be tailored to the specific industry/problem. 
+    FAIL: Generic advice (e.g., "reduce costs", "improve marketing") is a FAILURE, even if formatted nicely.
     """,
     
     "PRODUCT_ANALYTICS": """
-    JOB: Provide hypotheses, define metrics, design funnels, and suggest experiments (A/B tests).
-    CONSTRAINT: Must NOT write SQL code. Must NOT discuss high-level budget strategy.
-    SUCCESS: A great answer defines concrete metrics (e.g., 'Day-7 Retention') and specific user journey steps.
+    JOB: Define specific metrics and experiments.
+    SUCCESS: Mentions concrete metrics (e.g., 'Day-30 Retention').
+    FAIL: Vague terms like "measure engagement" without definition.
     """,
     
     "SQL_INVESTIGATION": """
-    JOB: Write accurate, executable SQL code based on the user's schema.
-    CONSTRAINT: Must NOT write long essays on business strategy.
-    SUCCESS: A great answer is VALID SQL that uses the correct table/column names.
+    JOB: Write executable SQL.
+    SUCCESS: Valid syntax, correct columns.
+    FAIL: Hallucinated columns or invalid syntax.
     """
 }
 
 # 2. THE SYSTEM PROMPT
 SYSTEM_TEMPLATE = """
-You are a specialized Quality Assurance Auditor. Your goal is to grade the AI's response based STRICTLY on its assigned role.
+You are a strict specialized Auditor. Grade the response 0.0 to 1.0.
 
 CURRENT ROLE: {intent}
 {scope_definition}
@@ -33,26 +34,21 @@ User Question: {question}
 AI Response: {output}
 
 SCORING RULES:
-1. **Stay in Lane:** Do NOT penalize the AI for missing parts that belong to other roles.
-   - Example: If the role is BUSINESS_STRATEGY, do *not* deduct points for missing SQL.
-   - Example: If the role is SQL_INVESTIGATION, do *not* deduct points for missing business advice.
+1. **The "Consultant Fluff" Penalty:**
+   - If the advice is generic (e.g., "Analyze customer feedback", "Optimize pricing") and could apply to ANY company, the **MAXIMUM SCORE is 0.5**.
+   - This applies **EVEN IF** the AI lists "Missing Information". Honesty does not excuse lack of substance.
 
-2. **Grade the Content:**
-   - 1.0 (Perfect): Perfect execution of the specific role. High specificity.
-   - 0.8 (Good): Solid answer, maybe slightly generic but accurate.
-   - 0.5 (Weak): Vague advice or generic SQL (e.g., SELECT *).
-   - 0.1 (Fail): Hallucinated data or refusal to answer.
+2. **The "Specifics" Reward:**
+   - Score > 0.8 ONLY if the answer contains *specific* numbers, distinct table names, or industry-specific tactics (e.g., "Penetration Pricing" for a startup).
 
-3. **Missing Info:**
-   - If the AI correctly identifies that critical data is missing (e.g., "I need a 'revenue' column to calculate ROI"), this is a POSITIVE feature. Give it a high score (0.9+).
+3. **Hallucination Check:**
+   - If the AI invents data or columns that weren't provided -> Score 0.1.
 
 Return STRICT JSON only:
-{{"confidence": 0.0, "rationale": "One sentence explanation focused on the specific role."}}
+{{"confidence": 0.0, "rationale": "One sentence explaining why it is specific or generic."}}
 """
 
 def get_confidence(client: OpenAI, question: str, output: str, intent: str) -> dict:
-    
-    # Get the specific job description for this intent
     scope_def = SCOPE_DEFINITIONS.get(intent, "JOB: Answer the analytics question.")
 
     formatted_prompt = SYSTEM_TEMPLATE.format(
@@ -72,7 +68,6 @@ def get_confidence(client: OpenAI, question: str, output: str, intent: str) -> d
     )
     
     raw = (resp.choices[0].message.content or "").strip()
-    
     if raw.startswith("```"):
         raw = raw.replace("```json", "").replace("```", "").strip()
 
@@ -82,4 +77,4 @@ def get_confidence(client: OpenAI, question: str, output: str, intent: str) -> d
         r = obj.get("rationale", "No rationale provided.")
         return {"score": max(0.0, min(1.0, c)), "rationale": r}
     except Exception:
-        return {"score": 0.5, "rationale": "Confidence scoring failed to parse."}
+        return {"score": 0.5, "rationale": "Confidence scoring failed."}
