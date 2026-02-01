@@ -63,7 +63,7 @@ def confidence_label(conf: float) -> str:
 # Sidebar
 # ----------------------------
 with st.sidebar:
-    st.title("🧠 Model Settings")
+    st.title("🧠 Copilot Settings")
     
     api_key = st.secrets.get("OPENAI_API_KEY")
     if not api_key:
@@ -147,13 +147,18 @@ with col2:
 def run_pipeline(user_question: str):
     with st.status("Thinking...", expanded=True) as status:
     
-        # 0. Gatekeeper Check
+        # 0. Gatekeeper Check (New Logic: Handles OFF_TOPIC, AMBIGUOUS, VALID)
         if not st.session_state.clarification_answers: 
             from gatekeeper import check_ambiguity
             gate_check = check_ambiguity(client, user_question)
             
-            if gate_check.get("is_ambiguous"):
-                return "AMBIGUOUS", gate_check["clarifying_question"], {}
+            status_label = gate_check.get("status", "VALID")
+            
+            if status_label == "OFF_TOPIC":
+                return "OFF_TOPIC", gate_check.get("message", "Request rejected."), {}
+            
+            if status_label == "AMBIGUOUS":
+                return "AMBIGUOUS", gate_check.get("message", "Please clarify your request."), {}
 
         # 1. Routing
         status.write("📍 Routing request...")
@@ -246,8 +251,20 @@ if run_pressed and question.strip():
 if st.session_state.run_pipeline_next and st.session_state.pending_question:
     status_code, data, extra = run_pipeline(st.session_state.pending_question)
     
+    # --- HANDLE OFF TOPIC ---
+    if status_code == "OFF_TOPIC":
+        st.error("⛔ Request Rejected")
+        st.write(f"**AI Message:** {data}")
+        st.caption("This agent is specialized in Data Analytics, Business Strategy, and SQL.")
+        
+        if st.button("Reset and Try Again"):
+            st.session_state.pending_question = ""
+            st.session_state.run_pipeline_next = False
+            st.rerun()
+        st.stop()
+
     # --- HANDLE AMBIGUITY (GATEKEEPER) ---
-    if status_code == "AMBIGUOUS":
+    elif status_code == "AMBIGUOUS":
         col_q, col_a = st.columns([1, 1])
         
         with col_q:
@@ -304,8 +321,7 @@ if st.session_state.analysis_results:
     results = st.session_state.analysis_results
     st.divider()
     
-    # --- NEW FEATURE: Refine Context ---
-    # This allows the user to edit their clarification and re-run immediately.
+    # --- Refine Context / Edit Clarification ---
     with st.expander("📝 Refine Context / Edit Clarification", expanded=False):
         c1, c2 = st.columns([3, 1])
         with c1:

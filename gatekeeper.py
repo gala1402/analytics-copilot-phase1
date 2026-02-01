@@ -2,22 +2,32 @@ from openai import OpenAI
 import json
 
 SYSTEM_PROMPT = """
-You are a Gatekeeper for a Data Analytics Copilot.
-Your job is to determine if the user's request is **Specific Enough** to be answered immediately, or if it requires clarification.
+You are a strict Gatekeeper for an Enterprise Data Analytics AI.
+Your job is to filter user queries before they reach the analysis agents.
 
-Criteria for "Specific Enough":
-1. Mentions specific data (columns, tables, or a CSV file).
-2. OR Mentions a specific business context (e.g., "SaaS churn", "Retail margins").
-3. OR Mentions a specific constraint (e.g., "I have no data, give me a theoretical framework").
+Classify the user input into one of three statuses:
 
-Criteria for "Ambiguous" (Needs Clarification):
-1. Vague one-liners: "Why is revenue down?", "How do I grow?", "Show me the data."
-2. No context on *what* business or *what* metric.
+1. **VALID**: The user is asking about data analytics, business strategy, SQL, metrics, CSV files, or python code for analysis.
+   - Example: "Analyze the churn rate."
+   - Example: "Write a SQL query for table users."
+   - Example: "How do I improve margins?"
+
+2. **AMBIGUOUS**: The user is asking a relevant business question, but it is too vague to answer without more context.
+   - Example: "Why is it down?"
+   - Example: "Show me the data."
+   - Example: "Fix the error."
+
+3. **OFF_TOPIC**: The user is asking about general knowledge, creative writing, coding unrelated to data, personal advice, or typing gibberish.
+   - Example: "Write a poem about clouds."
+   - Example: "Who is the president?"
+   - Example: "asdfghjkl"
+   - Example: "Hello" (Greeting only)
+   - Example: "Make me a sandwich."
 
 Output Format (JSON):
 {
-    "is_ambiguous": true/false,
-    "clarifying_question": "The question to ask the user (if ambiguous)"
+    "status": "VALID" | "AMBIGUOUS" | "OFF_TOPIC",
+    "message": "A short, polite refusal message if OFF_TOPIC, or a clarifying question if AMBIGUOUS. Null if VALID."
 }
 """
 
@@ -34,5 +44,5 @@ def check_ambiguity(client: OpenAI, question: str):
         )
         return json.loads(resp.choices[0].message.content)
     except Exception:
-        # Fallback if JSON fails
-        return {"is_ambiguous": False, "clarifying_question": ""}
+        # Fail-safe: Assume it's valid if JSON breaks, to avoid blocking good queries.
+        return {"status": "VALID", "message": None}
