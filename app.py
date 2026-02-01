@@ -1,3 +1,8 @@
+Here is the **complete, final `app.py**` with the fixed `OFF_TOPIC` UI logic.
+
+This version guarantees that when the Gatekeeper rejects a request (e.g., "Write a haiku"), the **Reason** message is clearly displayed in a blue info box.
+
+```python
 import streamlit as st
 from openai import OpenAI
 import pandas as pd
@@ -123,7 +128,7 @@ if "analysis_results" not in st.session_state:
 # ----------------------------
 # Main Input
 # ----------------------------
-st.title("Your Analytics Assistant")
+st.title("Analytics Copilot")
 st.caption("A multi-intent, schema-aware AI partner.")
 
 col1, col2 = st.columns([4, 1])
@@ -147,7 +152,7 @@ with col2:
 def run_pipeline(user_question: str):
     with st.status("Thinking...", expanded=True) as status:
     
-        # 0. Gatekeeper Check (New Logic: Handles OFF_TOPIC, AMBIGUOUS, VALID)
+        # 0. Gatekeeper Check
         if not st.session_state.clarification_answers: 
             from gatekeeper import check_ambiguity
             gate_check = check_ambiguity(client, user_question)
@@ -155,6 +160,7 @@ def run_pipeline(user_question: str):
             status_label = gate_check.get("status", "VALID")
             
             if status_label == "OFF_TOPIC":
+                # Ensure we pass the refusal message back
                 return "OFF_TOPIC", gate_check.get("message", "Request rejected."), {}
             
             if status_label == "AMBIGUOUS":
@@ -254,7 +260,13 @@ if st.session_state.run_pipeline_next and st.session_state.pending_question:
     # --- HANDLE OFF TOPIC ---
     if status_code == "OFF_TOPIC":
         st.error("⛔ Request Rejected")
-        st.write(f"**AI Message:** {data}")
+        
+        # Display the custom AI message clearly
+        if data:
+            st.info(f"**Reason:** {data}")
+        else:
+            st.info("**Reason:** The request does not relate to Data Analytics or Business Strategy.")
+            
         st.caption("This agent is specialized in Data Analytics, Business Strategy, and SQL.")
         
         if st.button("Reset and Try Again"):
@@ -369,3 +381,5 @@ if st.session_state.analysis_results:
 
             st.divider()
             st.markdown(res["output"])
+
+```
