@@ -23,7 +23,7 @@ from validators.sql_validator import validate_sql
 # Page Config
 # ----------------------------
 st.set_page_config(
-    page_title="Analytics Copilot", 
+    page_title="Your Analytics Assistant", 
     page_icon="🧠",
     layout="wide"
 )
@@ -63,7 +63,7 @@ def confidence_label(conf: float) -> str:
 # Sidebar
 # ----------------------------
 with st.sidebar:
-    st.title("🧠 Copilot Settings")
+    st.title("🧠 Model Settings")
     
     api_key = st.secrets.get("OPENAI_API_KEY")
     if not api_key:
