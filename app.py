@@ -1,3 +1,19 @@
+This is a great UX improvement. It allows the user to iterate on their query without starting from scratch.
+
+To do this, we will add a **"Refine Analysis"** section at the top of the results. This allows you to:
+
+1. **Edit the Context:** Change your clarification (e.g., switch from "Enterprise" to "SMB").
+2. **Rerun:** Immediately re-trigger the analysis with the new context.
+
+The Main Question is already editable at the top (standard Streamlit behavior), but I will ensure the logic preserves your flow.
+
+Here is the updated `app.py`.
+
+### 📁 `app.py` (Updated)
+
+I have added the **"Refine Context"** block inside the results section (bottom of the file).
+
+```python
 import streamlit as st
 from openai import OpenAI
 import pandas as pd
@@ -128,6 +144,7 @@ st.caption("A multi-intent, schema-aware AI partner.")
 
 col1, col2 = st.columns([4, 1])
 with col1:
+    # 1. Main Question Input (Editable)
     question = st.text_area(
         "What would you like to analyze?", 
         value=st.session_state.pending_question,
@@ -137,6 +154,7 @@ with col1:
 with col2:
     st.write("") 
     st.write("") 
+    # Logic: If user edits the main question and hits Run, we start fresh.
     run_pressed = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 
 # ----------------------------
@@ -170,7 +188,7 @@ def run_pipeline(user_question: str):
         user_context = st.session_state.clarification_answers.strip() or None
         if user_context:
             status.write("📝 Incorporating user context...")
-            # Schema detection
+            # Schema detection to wake up SQL Agent
             sql_triggers = ["table", "column", "schema", "database", ".csv", "dataset"]
             if any(trigger in user_context.lower() for trigger in sql_triggers):
                 from models import SQL_INVESTIGATION
@@ -238,24 +256,37 @@ if run_pressed and question.strip():
     st.session_state.pending_question = question.strip()
     st.session_state.run_pipeline_next = True
     st.session_state.proceed_with_answers = False
-    st.session_state.clarification_answers = ""
+    st.session_state.clarification_answers = "" # Reset context on new question
     st.session_state.analysis_results = None
 
 if st.session_state.run_pipeline_next and st.session_state.pending_question:
     status_code, data, extra = run_pipeline(st.session_state.pending_question)
     
+    # --- HANDLE AMBIGUITY (GATEKEEPER) ---
     if status_code == "AMBIGUOUS":
-        st.warning(f"⚠️ Clarification Needed: {data}")
-        st.write("The AI needs more context to give a high-quality answer.")
-        with st.form("gatekeeper_form"):
-            clarification = st.text_input("Please provide details (e.g. table name, goal):")
-            if st.form_submit_button("Submit Context"):
-                st.session_state.clarification_answers = clarification
-                st.session_state.proceed_with_answers = True
-                st.session_state.run_pipeline_next = True
-                st.rerun()
+        col_q, col_a = st.columns([1, 1])
+        
+        with col_q:
+            st.warning("⚠️ Clarification Needed")
+            st.info(f"**Question from AI:**\n\n{data}")
+            st.caption("The query was too vague. Please add specific details about your business goal, metric, or dataset.")
+        
+        with col_a:
+            with st.form("gatekeeper_form"):
+                st.markdown("### ✍️ Provide Context")
+                clarification = st.text_area(
+                    "Paste your schema or details here:",
+                    height=200, 
+                    placeholder="e.g. Table 'users' has columns 'id', 'email'..."
+                )
+                if st.form_submit_button("Submit Context", type="primary"):
+                    st.session_state.clarification_answers = clarification
+                    st.session_state.proceed_with_answers = True
+                    st.session_state.run_pipeline_next = True
+                    st.rerun()
         st.stop()
 
+    # --- HANDLE CLARIFICATION (MULTI-INTENT) ---
     elif status_code == "CLARIFICATION_NEEDED":
         gate = data
         st.warning("I need a few details before I can give a high-quality answer.")
@@ -277,6 +308,7 @@ if st.session_state.run_pipeline_next and st.session_state.pending_question:
                 st.session_state.run_pipeline_next = True
                 st.rerun()
 
+    # --- HANDLE SUCCESS ---
     elif status_code == "SUCCESS":
         st.session_state.analysis_results = data
         st.session_state.run_pipeline_next = False
@@ -288,6 +320,26 @@ if st.session_state.analysis_results:
     results = st.session_state.analysis_results
     st.divider()
     
+    # --- NEW FEATURE: Refine Context ---
+    # This allows the user to edit their clarification and re-run immediately.
+    with st.expander("📝 Refine Context / Edit Clarification", expanded=False):
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            edited_context = st.text_area(
+                "Edit your context here:",
+                value=st.session_state.clarification_answers,
+                height=100,
+                key="refine_context_input"
+            )
+        with c2:
+            st.write("") # Spacer
+            if st.button("🔄 Rerun Analysis", use_container_width=True):
+                st.session_state.clarification_answers = edited_context
+                st.session_state.proceed_with_answers = True # Skip clarification check
+                st.session_state.run_pipeline_next = True
+                st.rerun()
+    # -----------------------------------
+
     # Capitalize tab names
     tab_names = [k.replace("_", " ").title() for k in results.keys()]
     tabs = st.tabs(tab_names)
@@ -317,3 +369,5 @@ if st.session_state.analysis_results:
 
             st.divider()
             st.markdown(res["output"])
+
+```
