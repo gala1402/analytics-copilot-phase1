@@ -1,8 +1,4 @@
-Here is the **complete, final `app.py**` with the fixed `OFF_TOPIC` UI logic.
 
-This version guarantees that when the Gatekeeper rejects a request (e.g., "Write a haiku"), the **Reason** message is clearly displayed in a blue info box.
-
-```python
 import streamlit as st
 from openai import OpenAI
 import pandas as pd
@@ -382,4 +378,3 @@ if st.session_state.analysis_results:
             st.divider()
             st.markdown(res["output"])
 
-```
