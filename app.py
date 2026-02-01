@@ -1,19 +1,3 @@
-This is a great UX improvement. It allows the user to iterate on their query without starting from scratch.
-
-To do this, we will add a **"Refine Analysis"** section at the top of the results. This allows you to:
-
-1. **Edit the Context:** Change your clarification (e.g., switch from "Enterprise" to "SMB").
-2. **Rerun:** Immediately re-trigger the analysis with the new context.
-
-The Main Question is already editable at the top (standard Streamlit behavior), but I will ensure the logic preserves your flow.
-
-Here is the updated `app.py`.
-
-### 📁 `app.py` (Updated)
-
-I have added the **"Refine Context"** block inside the results section (bottom of the file).
-
-```python
 import streamlit as st
 from openai import OpenAI
 import pandas as pd
@@ -369,5 +353,3 @@ if st.session_state.analysis_results:
 
             st.divider()
             st.markdown(res["output"])
-
-```
