@@ -184,7 +184,7 @@ def run_pipeline(user_question: str):
             status.write("📝 Incorporating user context...")
             sql_triggers = ["table", "column", "schema", "database", ".csv", "dataset"]
             if any(trigger in user_context.lower() for trigger in sql_triggers):
-                from models import SQL_INVESTIGATION
+                # Removed redundant local import that caused UnboundLocalError
                 if SQL_INVESTIGATION not in intents:
                     status.write("💡 Detected schema details -> Activating SQL Agent.")
                     intents.append(SQL_INVESTIGATION)
@@ -203,6 +203,7 @@ def run_pipeline(user_question: str):
                 prompt = build_product_prompt(user_question, schema=schema, user_context=user_context)
                 validator = validate_product
             elif intent == SQL_INVESTIGATION:
+                # Allow SQL if user provided text schema context
                 if schema is None and not user_context:
                     results[intent] = {
                         "output": "⚠️ **SQL skipped**: No dataset uploaded and no schema description provided.",
@@ -224,7 +225,7 @@ def run_pipeline(user_question: str):
             )
             output = resp.choices[0].message.content or ""
             
-            # Confidence Scoring (Updated to include SCHEMA)
+            # Confidence Scoring
             conf_result = get_confidence(client, user_question, output, intent, schema)
             
             is_valid, feedback = validator(output)
