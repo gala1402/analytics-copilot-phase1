@@ -1,53 +1,78 @@
 import json
+import re
 from config import OPENAI_MODEL
 
 SYSTEM_PROMPT = """
 You are an expert Auditor of AI responses. 
-Your job is to grade the 'Confidence' of an AI's answer from 0.0 to 1.0 based on the INTENT.
+Your job is to grade the 'Confidence' of an AI's answer on a scale from 0.0 to 1.0.
 
-### RUBRIC BY INTENT:
+### SCORING RUBRIC:
 
-**1. FOR INTENT: "business_strategy" OR "product_analytics"**
-- **1.0 (High)**: The analysis references SPECIFIC data values or columns from the schema (e.g., mentioning "Pro Plan" or "Status column"). It gives tailored advice. **(NOTE: It does NOT need to write SQL code to get a 1.0).**
-- **0.5 (Medium)**: The advice is relevant but generic (e.g., "Improve onboarding") and doesn't explicitly reference the specific dataset provided.
-- **0.1 (Low)**: Hallucination or off-topic.
+**1.0 (Perfect / Certain)**
+- The answer is **Flawless**. It uses exact column names and values from the schema.
+- For Code: The SQL is syntactically perfect and runs against the schema.
+- For Strategy: The advice is highly specific to the business context provided.
 
-**2. FOR INTENT: "sql_investigation"**
-- **1.0 (High)**: Generates valid SQL using EXACT column names and values from the schema.
-- **0.5 (Medium)**: Generates SQL but hedges ("Assuming you have a table...").
-- **0.1 (Low)**: Uses incorrect syntax or hallucinated columns.
+**0.9 (Excellent - Safe Partial Success)**
+- **CRITICAL USE CASE:** If the user asks for two things (e.g., "Calculate MRR" AND "Analyze iOS"), and the Agent correctly answers the possible part (MRR) while safely refusing the impossible part (iOS), **this is a 0.9**.
+- The Agent correctly identified a limitation in the data and did not hallucinate. This is "High Confidence" behavior.
+
+**0.7 (Good - Generic but Valid)**
+- The answer is correct but generic.
+- Example: "To improve retention, try email campaigns" (Valid advice, but not specific to the dataset).
+- Example: "I assume you have a 'date' column" (Reasonable assumption, but not grounded in schema).
+
+**0.5 (Caution - Hedging)**
+- The answer is mostly hedging ("It depends...", "I'm not sure...").
+- The SQL looks plausible but uses columns that might not exist.
+
+**0.1 (Fail - Hallucination)**
+- The answer uses columns that definitively DO NOT exist.
+- The logic is completely flawed or off-topic.
 
 ### INPUT DATA:
-- **User Question**: The full user query.
-- **Intent**: The specific job this agent was assigned (e.g., "business_strategy").
-- **Agent Output**: The response to grade.
-- **Schema Context**: The available data structure.
+- **User Question**: {question}
+- **Intent**: {intent}
+- **Schema Context**: {schema}
+- **Agent Output**: {output}
 
-**IMPORTANT:** Do NOT penalize a Strategy agent for missing SQL, or a SQL agent for missing Strategy. Grade them only on their assigned Intent.
-
-Output JSON: {"score": float, "rationale": "Short explanation"}
+Output JSON: {{"score": float, "rationale": "One sentence explanation"}}
 """
+
+def clean_json_string(json_str: str) -> str:
+    """Removes markdown backticks if present."""
+    if "```json" in json_str:
+        json_str = json_str.split("```json")[1].split("```")[0]
+    elif "```" in json_str:
+        json_str = json_str.split("```")[1].split("```")[0]
+    return json_str.strip()
 
 def get_confidence(client, question, output, intent, schema=None):
     try:
-        # Convert schema to string for the prompt
         schema_str = json.dumps(schema, indent=2) if schema else "No Schema Provided"
-
+        
+        # Safe Prompting
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"""
-                User Question: {question}
-                Intent: {intent}
-                Schema Context: {schema_str}
-                
-                Agent Output: {output}
-                """}
+                {"role": "system", "content": SYSTEM_PROMPT.format(
+                    question=question, 
+                    intent=intent, 
+                    schema=schema_str, 
+                    output=output
+                )}
             ],
             temperature=0.0,
             response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content)
+        
+        content = response.choices[0].message.content
+        cleaned_content = clean_json_string(content)
+        return json.loads(cleaned_content)
+        
     except Exception as e:
-        return {"score": 0.5, "rationale": f"Error calculating confidence: {e}"}
+        print(f"Confidence Error: {e}")
+        return {
+            "score": 0.5, 
+            "rationale": "Auditor failed to grade response (Fallback)."
+        }
