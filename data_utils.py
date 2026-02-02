@@ -1,35 +1,38 @@
 import pandas as pd
+import streamlit as st
 
-def load_csv(file):
-    # Try different encodings if default fails
+@st.cache_data
+def load_csv(uploaded_file):
+    """Loads a CSV file into a Pandas DataFrame."""
     try:
-        return pd.read_csv(file)
-    except UnicodeDecodeError:
-        return pd.read_csv(file, encoding='latin1')
+        return pd.read_csv(uploaded_file)
+    except Exception as e:
+        return None
 
-def summarize_df(df, max_cols=50):
-    summary = {
-        "rows": int(len(df)),
-        "total_columns": len(df.columns),
-        "columns": []
-    }
-    
-    # Truncate if too many columns to prevent token overflow
-    cols_to_summarize = df.columns[:max_cols]
-    
-    summary["columns"] = [
-        {
-            "name": col,
-            "dtype": str(df[col].dtype),
-            "non_null_pct": round(float(df[col].notnull().mean()) * 100, 1),
-            "unique": int(df[col].nunique(dropna=True)),
-            # Sample values help the LLM understand what the data looks like
-            "sample_values": df[col].dropna().astype(str).head(3).tolist()
-        }
-        for col in cols_to_summarize
-    ]
-    
-    if len(df.columns) > max_cols:
-        summary["warning"] = f"Schema truncated. Only first {max_cols} columns shown."
+def summarize_df(df: pd.DataFrame) -> dict:
+    """
+    Generates a rich schema summary including data types and SAMPLE VALUES.
+    This gives the AI 'eyes' to see that 'Pro' and 'churned' are real values.
+    """
+    summary = {}
+    for col in df.columns:
+        # Get data type
+        dtype = str(df[col].dtype)
         
+        # Get unique values (Smart Sampling)
+        try:
+            if df[col].nunique() < 20:
+                # For categorical columns (like 'plan_type'), get all values
+                examples = df[col].unique().tolist()
+            else:
+                # For high-cardinality columns, get a random sample of 5
+                examples = df[col].dropna().sample(min(5, len(df))).tolist()
+        except:
+            examples = []
+
+        summary[col] = {
+            "dtype": dtype,
+            "unique_count": int(df[col].nunique()),
+            "examples": examples # <--- The AI can now see your specific data
+        }
     return summary

@@ -60,7 +60,7 @@ def confidence_label(conf: float) -> str:
     return "Low Confidence"
 
 # ----------------------------
-# Sidebar (Restored)
+# Sidebar
 # ----------------------------
 with st.sidebar:
     st.title("🧠 Copilot Settings")
@@ -121,14 +121,13 @@ if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
 
 # ----------------------------
-# Main Content Area
+# Main Input
 # ----------------------------
 st.title("Analytics Copilot")
 st.caption("A multi-intent, schema-aware AI partner.")
 
 col1, col2 = st.columns([4, 1])
 with col1:
-    # 1. Main Question Input (Editable)
     question = st.text_area(
         "What would you like to analyze?", 
         value=st.session_state.pending_question,
@@ -138,7 +137,6 @@ with col1:
 with col2:
     st.write("") 
     st.write("") 
-    # Logic: If user edits the main question and hits Run, we start fresh.
     run_pressed = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
 
 # ----------------------------
@@ -205,7 +203,6 @@ def run_pipeline(user_question: str):
                 prompt = build_product_prompt(user_question, schema=schema, user_context=user_context)
                 validator = validate_product
             elif intent == SQL_INVESTIGATION:
-                # Allow SQL if user provided text schema context
                 if schema is None and not user_context:
                     results[intent] = {
                         "output": "⚠️ **SQL skipped**: No dataset uploaded and no schema description provided.",
@@ -227,8 +224,8 @@ def run_pipeline(user_question: str):
             )
             output = resp.choices[0].message.content or ""
             
-            # Confidence Scoring
-            conf_result = get_confidence(client, user_question, output, intent)
+            # Confidence Scoring (Updated to include SCHEMA)
+            conf_result = get_confidence(client, user_question, output, intent, schema)
             
             is_valid, feedback = validator(output)
             

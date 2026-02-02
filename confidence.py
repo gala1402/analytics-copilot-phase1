@@ -1,80 +1,50 @@
 import json
 from openai import OpenAI
+from config import OPENAI_MODEL
 
-# 1. SCOPE DEFINITIONS
-SCOPE_DEFINITIONS = {
-    "BUSINESS_STRATEGY": """
-    JOB: Provide specific strategic advice based on the user's stated constraints.
-    CONSTRAINT: Must NOT write SQL.
-    SUCCESS: Advice must be tailored to the specific industry/problem. 
-    FAIL: Generic advice (e.g., "reduce costs", "improve marketing") is a FAILURE, even if formatted nicely.
-    """,
-    
-    "PRODUCT_ANALYTICS": """
-    JOB: Define specific metrics and experiments.
-    SUCCESS: Mentions concrete metrics (e.g., 'Day-30 Retention').
-    FAIL: Vague terms like "measure engagement" without definition.
-    """,
-    
-    "SQL_INVESTIGATION": """
-    JOB: Write executable SQL.
-    SUCCESS: Valid syntax, correct columns.
-    FAIL: Hallucinated columns or invalid syntax.
-    """
-}
+SYSTEM_PROMPT = """
+You are an expert Auditor of AI responses. 
+Your job is to grade the 'Confidence' of an AI's answer from 0.0 to 1.0.
 
-# 2. THE SYSTEM PROMPT
-SYSTEM_TEMPLATE = """
-You are a strict specialized Auditor. Grade the response 0.0 to 1.0.
+### SCORING CRITERIA:
+1. **1.0 (Certainty)**: The answer uses SPECIFIC column names AND SPECIFIC data values found in the provided schema (e.g., using "WHERE status = 'churned'" when 'churned' is in the schema examples).
+2. **0.8 (High)**: Good logic and valid SQL, but might be slightly generic.
+3. **0.5 (Medium)**: The answer is generic "Standard Advice" or hedges ("Assuming you have a column...").
+4. **0.1 (Low)**: Hallucinated columns, wrong logic, or refuses to answer.
 
-CURRENT ROLE: {intent}
-{scope_definition}
+### INPUT DATA:
+- **User Question**: The user's query.
+- **Agent Output**: The response to grade.
+- **Intent**: The agent type (SQL, Strategy, Product).
+- **Schema Context**: The actual database structure and sample values.
 
-User Question: {question}
-AI Response: {output}
-
-SCORING RULES:
-1. **The "Consultant Fluff" Penalty:**
-   - If the advice is generic (e.g., "Analyze customer feedback", "Optimize pricing") and could apply to ANY company, the **MAXIMUM SCORE is 0.5**.
-   - This applies **EVEN IF** the AI lists "Missing Information". Honesty does not excuse lack of substance.
-
-2. **The "Specifics" Reward:**
-   - Score > 0.8 ONLY if the answer contains *specific* numbers, distinct table names, or industry-specific tactics (e.g., "Penetration Pricing" for a startup).
-
-3. **Hallucination Check:**
-   - If the AI invents data or columns that weren't provided -> Score 0.1.
-
-Return STRICT JSON only:
-{{"confidence": 0.0, "rationale": "One sentence explaining why it is specific or generic."}}
+Output JSON: {"score": float, "rationale": "Short explanation"}
 """
 
-def get_confidence(client: OpenAI, question: str, output: str, intent: str) -> dict:
-    scope_def = SCOPE_DEFINITIONS.get(intent, "JOB: Answer the analytics question.")
-
-    formatted_prompt = SYSTEM_TEMPLATE.format(
-        question=question,
-        intent=intent,
-        scope_definition=scope_def,
-        output=output[:4000]
-    )
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a strict evaluator. Output JSON only."},
-            {"role": "user", "content": formatted_prompt},
-        ],
-        temperature=0,
-    )
-    
-    raw = (resp.choices[0].message.content or "").strip()
-    if raw.startswith("```"):
-        raw = raw.replace("```json", "").replace("```", "").strip()
-
+def get_confidence(client, question, output, intent, schema=None):
+    """
+    Calculates confidence. 
+    Crucially, it now takes 'schema' as an input so it can verify facts.
+    """
     try:
-        obj = json.loads(raw)
-        c = float(obj.get("confidence", 0.5))
-        r = obj.get("rationale", "No rationale provided.")
-        return {"score": max(0.0, min(1.0, c)), "rationale": r}
-    except Exception:
-        return {"score": 0.5, "rationale": "Confidence scoring failed."}
+        # Convert schema to string for the prompt
+        schema_str = json.dumps(schema, indent=2) if schema else "No Schema Provided"
+
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"""
+                User Question: {question}
+                Intent: {intent}
+                Schema Context: {schema_str}
+                
+                Agent Output: {output}
+                """}
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        return {"score": 0.5, "rationale": "Error calculating confidence."}
