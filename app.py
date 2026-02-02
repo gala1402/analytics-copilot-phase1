@@ -124,7 +124,7 @@ if "analysis_results" not in st.session_state:
 # ----------------------------
 # Main Input
 # ----------------------------
-st.title("Analytics Copilot")
+st.title("Your Analytics Assistant")
 st.caption("A multi-intent, schema-aware AI partner.")
 
 col1, col2 = st.columns([4, 1])
