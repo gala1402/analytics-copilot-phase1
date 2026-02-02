@@ -46,10 +46,6 @@ st.markdown("""
         padding-top: 10px;
         padding-bottom: 10px;
     }
-    /* Style for the sidebar to make the reset button pop */
-    [data-testid="stSidebar"] .stButton button {
-        width: 100%;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -64,20 +60,11 @@ def confidence_label(conf: float) -> str:
     return "Low Confidence"
 
 # ----------------------------
-# Sidebar (Left Block)
+# Sidebar (Restored)
 # ----------------------------
 with st.sidebar:
     st.title("🧠 Copilot Settings")
     
-    # 1. Reset Button (Top Left Corner)
-    if st.button("🔄 Reset Session", type="secondary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-
-    st.divider()
-    
-    # 2. API Key Handling
     api_key = st.secrets.get("OPENAI_API_KEY")
     if not api_key:
         import os
@@ -90,8 +77,34 @@ with st.sidebar:
     
     client = OpenAI(api_key=api_key)
 
-    # 3. Data Preview Placeholder (Will be filled if data is uploaded)
-    data_preview_container = st.container()
+    st.divider()
+    
+    st.subheader("📂 Data Context")
+    uploaded_file = st.file_uploader("Upload CSV (Optional)", type=["csv"])
+    
+    schema = None
+    df = None
+
+    if uploaded_file:
+        try:
+            df = load_csv(uploaded_file)
+            schema = summarize_df(df)
+            st.success(f"Loaded {len(df)} rows")
+            with st.expander("View Data Preview"):
+                st.dataframe(df.head())
+            with st.expander("View Schema Summary"):
+                st.json(schema)
+        except Exception as e:
+            st.error(f"Error reading CSV: {e}")
+            st.stop()
+    else:
+        st.info("Upload CSV for grounded analysis.")
+
+    st.divider()
+    if st.button("🔄 Reset Session", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
 # ----------------------------
 # Session State
@@ -110,12 +123,12 @@ if "analysis_results" not in st.session_state:
 # ----------------------------
 # Main Content Area
 # ----------------------------
-st.title("Your Analytics Assistant")
+st.title("Analytics Copilot")
 st.caption("A multi-intent, schema-aware AI partner.")
 
-# 1. Question Input & Run Button
 col1, col2 = st.columns([4, 1])
 with col1:
+    # 1. Main Question Input (Editable)
     question = st.text_area(
         "What would you like to analyze?", 
         value=st.session_state.pending_question,
@@ -125,44 +138,8 @@ with col1:
 with col2:
     st.write("") 
     st.write("") 
+    # Logic: If user edits the main question and hits Run, we start fresh.
     run_pressed = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
-
-# 2. File Uploader (Moved Below Run Button)
-st.write("") # Spacer
-with st.expander("📂 Upload Dataset (Optional)", expanded=False):
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"], label_visibility="collapsed")
-
-# ----------------------------
-# Data Loading & Sidebar Population
-# ----------------------------
-schema = None
-df = None
-
-if uploaded_file:
-    try:
-        df = load_csv(uploaded_file)
-        schema = summarize_df(df)
-        
-        # --- POPULATE SIDEBAR (Left Block) ---
-        with data_preview_container:
-            st.success(f"✅ Loaded {len(df)} rows")
-            st.divider()
-            st.subheader("📊 Data Explorer")
-            
-            with st.expander("View Data Preview", expanded=True):
-                st.dataframe(df.head())
-            
-            with st.expander("View Schema", expanded=False):
-                st.json(schema)
-        # -------------------------------------
-        
-    except Exception as e:
-        st.error(f"Error reading CSV: {e}")
-        st.stop()
-else:
-    # Default Sidebar Message
-    with data_preview_container:
-        st.info("Upload a CSV in the main window to see the data preview here.")
 
 # ----------------------------
 # Core Logic
@@ -185,13 +162,8 @@ def run_pipeline(user_question: str):
                 return "AMBIGUOUS", gate_check.get("message", "Please clarify your request."), {}
 
         # 0b. Gatekeeper Check (Clarification Answers)
-        # This prevents the user from typing 'write a poem' inside the clarification box.
         if st.session_state.clarification_answers:
             gate_check_clarify = check_ambiguity(client, st.session_state.clarification_answers)
-            
-            # We ONLY check for OFF_TOPIC here. 
-            # We allow 'AMBIGUOUS' in clarifications because partial context (e.g. 'users table') 
-            # might seem ambiguous on its own but is valid context.
             if gate_check_clarify.get("status") == "OFF_TOPIC":
                  return "OFF_TOPIC", gate_check_clarify.get("message", "Clarification rejected as off-topic."), {}
 
@@ -233,6 +205,7 @@ def run_pipeline(user_question: str):
                 prompt = build_product_prompt(user_question, schema=schema, user_context=user_context)
                 validator = validate_product
             elif intent == SQL_INVESTIGATION:
+                # Allow SQL if user provided text schema context
                 if schema is None and not user_context:
                     results[intent] = {
                         "output": "⚠️ **SQL skipped**: No dataset uploaded and no schema description provided.",
@@ -254,7 +227,9 @@ def run_pipeline(user_question: str):
             )
             output = resp.choices[0].message.content or ""
             
+            # Confidence Scoring
             conf_result = get_confidence(client, user_question, output, intent)
+            
             is_valid, feedback = validator(output)
             
             results[intent] = {
@@ -276,12 +251,13 @@ if run_pressed and question.strip():
     st.session_state.pending_question = question.strip()
     st.session_state.run_pipeline_next = True
     st.session_state.proceed_with_answers = False
-    st.session_state.clarification_answers = ""
+    st.session_state.clarification_answers = "" # Reset context on new question
     st.session_state.analysis_results = None
 
 if st.session_state.run_pipeline_next and st.session_state.pending_question:
     status_code, data, extra = run_pipeline(st.session_state.pending_question)
     
+    # --- HANDLE OFF TOPIC ---
     if status_code == "OFF_TOPIC":
         st.error("⛔ Request Rejected")
         if data:
@@ -295,12 +271,15 @@ if st.session_state.run_pipeline_next and st.session_state.pending_question:
             st.rerun()
         st.stop()
 
+    # --- HANDLE AMBIGUITY (GATEKEEPER) ---
     elif status_code == "AMBIGUOUS":
         col_q, col_a = st.columns([1, 1])
+        
         with col_q:
             st.warning("⚠️ Clarification Needed")
             st.info(f"**Question from AI:**\n\n{data}")
             st.caption("The query was too vague. Please add specific details about your business goal, metric, or dataset.")
+        
         with col_a:
             with st.form("gatekeeper_form"):
                 st.markdown("### ✍️ Provide Context")
@@ -316,6 +295,7 @@ if st.session_state.run_pipeline_next and st.session_state.pending_question:
                     st.rerun()
         st.stop()
 
+    # --- HANDLE CLARIFICATION (MULTI-INTENT) ---
     elif status_code == "CLARIFICATION_NEEDED":
         gate = data
         st.warning("I need a few details before I can give a high-quality answer.")
@@ -337,6 +317,7 @@ if st.session_state.run_pipeline_next and st.session_state.pending_question:
                 st.session_state.run_pipeline_next = True
                 st.rerun()
 
+    # --- HANDLE SUCCESS ---
     elif status_code == "SUCCESS":
         st.session_state.analysis_results = data
         st.session_state.run_pipeline_next = False
@@ -348,6 +329,7 @@ if st.session_state.analysis_results:
     results = st.session_state.analysis_results
     st.divider()
     
+    # --- Refine Context / Edit Clarification ---
     with st.expander("📝 Refine Context / Edit Clarification", expanded=False):
         c1, c2 = st.columns([3, 1])
         with c1:
@@ -358,13 +340,14 @@ if st.session_state.analysis_results:
                 key="refine_context_input"
             )
         with c2:
-            st.write("")
+            st.write("") # Spacer
             if st.button("🔄 Rerun Analysis", use_container_width=True):
                 st.session_state.clarification_answers = edited_context
-                st.session_state.proceed_with_answers = True
+                st.session_state.proceed_with_answers = True # Skip clarification check
                 st.session_state.run_pipeline_next = True
                 st.rerun()
 
+    # Capitalize tab names
     tab_names = [k.replace("_", " ").title() for k in results.keys()]
     tabs = st.tabs(tab_names)
     
@@ -377,6 +360,7 @@ if st.session_state.analysis_results:
                 label = confidence_label(score)
                 st.caption(f"Confidence Score: **{score:.2f} / 1.00** • {label}")
                 st.progress(score)
+                
                 if score < CONFIDENCE_THRESHOLD:
                     st.warning(f"⚠️ Low Confidence: {res['rationale']}")
                 else:
