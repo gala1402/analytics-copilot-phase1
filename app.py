@@ -60,7 +60,7 @@ def confidence_label(conf: float) -> str:
     return "Low Confidence"
 
 # ----------------------------
-# Sidebar
+# Sidebar (Restored)
 # ----------------------------
 with st.sidebar:
     st.title("🧠 Copilot Settings")
@@ -142,7 +142,7 @@ with col2:
 # ----------------------------
 # Core Logic
 # ----------------------------
-def run_pipeline(user_question: str):
+def run_pipeline(user_question: str, schema_context=None):
     with st.status("Thinking...", expanded=True) as status:
     
         from gatekeeper import check_ambiguity
@@ -173,18 +173,19 @@ def run_pipeline(user_question: str):
         
         # 2. Clarification
         status.write("🤔 Checking for ambiguity...")
-        gate = get_clarification(client, user_question, intents, schema)
+        gate = get_clarification(client, user_question, intents, schema_context)
         
         if gate.get("needs_clarification", False) and not st.session_state.proceed_with_answers:
             status.update(label="Clarification Required", state="error", expanded=True)
             return "CLARIFICATION_NEEDED", gate, intents
+        else:
+            status.write("✅ Request is clear. Proceeding...")
             
         user_context = st.session_state.clarification_answers.strip() or None
         if user_context:
             status.write("📝 Incorporating user context...")
             sql_triggers = ["table", "column", "schema", "database", ".csv", "dataset"]
             if any(trigger in user_context.lower() for trigger in sql_triggers):
-                # Removed redundant local import that caused UnboundLocalError
                 if SQL_INVESTIGATION not in intents:
                     status.write("💡 Detected schema details -> Activating SQL Agent.")
                     intents.append(SQL_INVESTIGATION)
@@ -197,14 +198,14 @@ def run_pipeline(user_question: str):
             status.write(f"⚡ Generating: {intent.replace('_', ' ')}...")
             
             if intent == BUSINESS_STRATEGY:
-                prompt = build_business_prompt(user_question, schema=schema, user_context=user_context)
+                prompt = build_business_prompt(user_question, schema=schema_context, user_context=user_context)
                 validator = validate_business
             elif intent == PRODUCT_ANALYTICS:
-                prompt = build_product_prompt(user_question, schema=schema, user_context=user_context)
+                prompt = build_product_prompt(user_question, schema=schema_context, user_context=user_context)
                 validator = validate_product
             elif intent == SQL_INVESTIGATION:
-                # Allow SQL if user provided text schema context
-                if schema is None and not user_context:
+                # Allow SQL if user provided text schema context OR if we have a file schema
+                if schema_context is None and not user_context:
                     results[intent] = {
                         "output": "⚠️ **SQL skipped**: No dataset uploaded and no schema description provided.",
                         "score": 0.0,
@@ -213,7 +214,7 @@ def run_pipeline(user_question: str):
                         "feedback": "Upload CSV or describe your table schema."
                     }
                     continue
-                prompt = build_sql_prompt(user_question, schema=schema, user_context=user_context)
+                prompt = build_sql_prompt(user_question, schema=schema_context, user_context=user_context)
                 validator = validate_sql
             else:
                 continue
@@ -225,8 +226,8 @@ def run_pipeline(user_question: str):
             )
             output = resp.choices[0].message.content or ""
             
-            # Confidence Scoring
-            conf_result = get_confidence(client, user_question, output, intent, schema)
+            # Confidence Scoring (Passed schema to verify facts)
+            conf_result = get_confidence(client, user_question, output, intent, schema_context)
             
             is_valid, feedback = validator(output)
             
@@ -253,7 +254,8 @@ if run_pressed and question.strip():
     st.session_state.analysis_results = None
 
 if st.session_state.run_pipeline_next and st.session_state.pending_question:
-    status_code, data, extra = run_pipeline(st.session_state.pending_question)
+    # PASS SCHEMA TO PIPELINE
+    status_code, data, extra = run_pipeline(st.session_state.pending_question, schema)
     
     # --- HANDLE OFF TOPIC ---
     if status_code == "OFF_TOPIC":
