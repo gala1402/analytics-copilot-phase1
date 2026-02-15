@@ -1,31 +1,25 @@
-from openai import OpenAI
-from models import ALL_INTENTS, PRODUCT_ANALYTICS
+import json
+from config import OPENAI_MODEL  # <--- Ensure this import exists
+from models import BUSINESS_STRATEGY, PRODUCT_ANALYTICS, SQL_INVESTIGATION
 
-SYSTEM_PROMPT = f"""
-Classify the user's analytics question into one or more intents from:
-{", ".join(ALL_INTENTS)}.
+ROUTER_PROMPT = """
+You are the Intent Classifier for an Analytics AI. 
+...
+"""
 
-Return ONLY a comma-separated list of labels.
-No extra text.
-
-Guidance:
-- BUSINESS_STRATEGY: business decision framing, unit economics, KPI tradeoffs, strategy/ROI
-- PRODUCT_ANALYTICS: funnels, cohorts, segmentation, experimentation, product metrics
-- SQL_INVESTIGATION: request for SQL, queries, table-level computations
-
-If unsure, return {PRODUCT_ANALYTICS}.
-""".strip()
-
-def classify_intent(client: OpenAI, question: str):
-    resp = client.chat.completions.create(
-        model="gpt-4.0-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": question.strip()},
-        ],
-        temperature=0,
-    )
-    raw = (resp.choices[0].message.content or "").strip()
-    intents = [i.strip().upper() for i in raw.split(",") if i.strip()]
-    filtered = [i for i in intents if i in ALL_INTENTS]
-    return filtered or [PRODUCT_ANALYTICS]
+def classify_intent(client, question: str):
+    try:
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,  # <--- Uses the variable from config.py
+            messages=[
+                {"role": "system", "content": ROUTER_PROMPT},
+                {"role": "user", "content": question}
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"}
+        )
+        data = json.loads(response.choices[0].message.content)
+        return data.get("intents", [])
+    except Exception as e:
+        print(f"Router Error: {e}")
+        return [BUSINESS_STRATEGY]
