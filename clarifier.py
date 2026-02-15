@@ -31,7 +31,7 @@ def get_clarification(client: OpenAI, question: str, intents: list[str], schema)
     }
 
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4.0-mini",
         messages=[
             {"role": "system", "content": CLARIFIER_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(payload)},

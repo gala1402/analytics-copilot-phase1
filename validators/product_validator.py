@@ -10,8 +10,8 @@ def validate_product(output: str):
     if re.search(r"\b(allocate budget|budget allocation|invest in acquisition|invest in retention|go-to-market|gtm)\b", core):
         return False, "Product Analytics should not include budget/strategy recommendations. Keep it analytics-only."
 
-    # No SQL leakage (Fixed: Removed common words like 'from', 'where', 'join')
-    if re.search(r"\b(select\s+\*|select\s+top|group\s+by|order\s+by|inner\s+join|left\s+join|right\s+join)\b", core):
+    # No SQL leakage (actual SQL tokens)
+    if re.search(r"\b(select|with|from|join|group by|where)\b", core):
         return False, "Product Analytics should not include SQL or pseudo-SQL."
 
     # Must include product artifacts
