@@ -1,5 +1,15 @@
-﻿user_id,plan_type,signup_date,last_login_date,status,mrr
-101,Pro,1/1/2024,1/15/2024,churned,50
-102,Basic,1/2/2024,1/20/2024,active,10
-103,Pro,1/5/2024,1/25/2024,active,50
-104,Enterprise,1/10/2024,1/11/2024,churned,500
+Date	Segment	Revenue	Active_Users	Churn_Count
+1/1/2024	Enterprise	12000	450	2
+1/1/2024	SMB	5000	1200	15
+1/2/2024	Enterprise	12500	452	1
+1/2/2024	SMB	4800	1180	22
+1/3/2024	Enterprise	13000	455	0
+1/3/2024	SMB	5200	1210	10
+1/4/2024	Enterprise	12800	453	3
+1/4/2024	SMB	4900	1195	18
+1/5/2024	Enterprise	14000	460	1
+1/5/2024	SMB	5500	1250	8
+1/6/2024	Enterprise	13500	458	2
+1/6/2024	SMB	5100	1220	12
+1/7/2024	Enterprise	14500	465	0
+1/7/2024	SMB	5800	1300	5

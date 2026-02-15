@@ -102,15 +102,30 @@ elif st.session_state.step == "generate":
                 # FIX: Ensure content exists before proceeding
                 if content:
                     if intent == VISUALIZATION:
-                        try:
-                            code = content.split("```python")[1].split("```")[0].strip()
-                            st.code(code, language="python")
-                            local_vars = {"df": df, "px": px, "st": st}
-                            exec(code, {}, local_vars)
-                            if "fig" in local_vars:
-                                st.plotly_chart(local_vars["fig"], use_container_width=True)
-                        except Exception as e:
-                            st.error(f"Code Execution Error: {e}")
+                        # --- Inside the VISUALIZATION intent block in app.py ---
+                                try:
+                                    # Remove fig.show() if the LLM adds it, as it breaks Streamlit flow
+                                    code = content.split("```python")[1].split("```")[0].strip()
+                                    code = code.replace("fig.show()", "# fig.show() handled by streamlit")
+                                    
+                                    st.code(code, language="python")
+                                    
+                                    # Pre-processing: Ensure dates are datetime objects for better plotting
+                                    if 'Date' in df.columns:
+                                        df['Date'] = pd.to_datetime(df['Date'])
+
+                                    local_vars = {"df": df, "px": px, "pd": pd, "st": st}
+                                    exec(code, {}, local_vars)
+                                    
+                                    # Intelligent Capture: find any plotly figure object created in the code
+                                    fig = local_vars.get("fig")
+                                    if fig:
+                                        st.plotly_chart(fig, use_container_width=True)
+                                    else:
+                                        st.warning("Code executed but no 'fig' object was found to display.")
+                                        
+                                except Exception as e:
+                                    st.error(f"Visualization Error: {e}")
                     else:
                         # FIX: This is where line 142 was crashing
                         conf = get_confidence(client, content)
