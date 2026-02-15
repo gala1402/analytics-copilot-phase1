@@ -1,6 +1,7 @@
 import json
 from openai import OpenAI
 from models import SQL_INVESTIGATION
+from config import OPENAI_MODEL
 
 CLARIFIER_SYSTEM_PROMPT = """
 You decide whether clarification is required BEFORE analysis.
