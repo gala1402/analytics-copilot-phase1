@@ -1,62 +1,35 @@
-# confidence.py
 import json
-from config import OPENAI_MODEL
+from openai import OpenAI
 
-SYSTEM_PROMPT = """
-You are an expert Auditor of AI responses. 
-Your job is to evaluate the 'Confidence' of an AI's answer.
+CONF_SYSTEM = """
+You are a strict evaluator of analytics answer quality.
+Score confidence from 0.0 to 1.0 based on grounding and completeness.
+Return STRICT JSON only: {"confidence": 0.0, "rationale": "reason"}
+""".strip()
 
-### PHILOSOPHY:
-**Confidence** = **Certainty in Truth**.
-If the AI correctly refuses a request because data is missing, that is **HIGH CONFIDENCE (High)**.
-
-### SCORING TIERS:
-
-**1.0 (High Confidence)**
-- **Verified Truth:** Uses proven facts from the Schema.
-- **Verified Refusal:** Explicitly states "I cannot analyze X because column Y is missing" (and Y is indeed missing).
-
-**0.5 (Medium Confidence)**
-- **Generalization:** Valid advice, but not linked to specific data columns.
-- **Assumptions:** "Assuming you have a date column..."
-
-**0.1 (Low Confidence)**
-- **Hallucination:** Claims to use columns that do not exist.
-
-### OUTPUT FORMAT:
-Return JSON with:
-1. `score`: float (1.0, 0.5, or 0.1)
-2. `rationale`: string. **CRITICAL:** If score < 1.0, pinpoint the EXACT missing data or vague term. (e.g., "Missing 'device' column.").
-
-Output JSON: {{"score": float, "rationale": "Pinpoint explanation"}}
-"""
-
-def clean_json_string(json_str: str) -> str:
-    if "```json" in json_str:
-        json_str = json_str.split("```json")[1].split("```")[0]
-    elif "```" in json_str:
-        json_str = json_str.split("```")[1].split("```")[0]
-    return json_str.strip()
-
-def get_confidence(client, question, output, intent, schema=None):
+def get_confidence(client: OpenAI, output: str) -> float:
+    # BUG FIX: Handle empty or non-string input
+    if not output or not isinstance(output, str):
+        return 0.0
+    
     try:
-        schema_str = json.dumps(schema, indent=2) if schema else "No Schema Provided"
-        
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT.format(
-                    question=question, 
-                    intent=intent, 
-                    schema=schema_str, 
-                    output=output
-                )}
+                {"role": "system", "content": CONF_SYSTEM},
+                {"role": "user", "content": output[:5000]}, # Protect against token limits
             ],
-            temperature=0.0,
-            response_format={"type": "json_object"}
+            temperature=0,
         )
-        content = clean_json_string(response.choices[0].message.content)
-        return json.loads(content)
+        raw = (resp.choices[0].message.content or "").strip()
+        
+        # Robust JSON extraction
+        if "```json" in raw:
+            raw = raw.split("```json")[1].split("```")[0].strip()
+        
+        obj = json.loads(raw)
+        c = float(obj.get("confidence", 0.5))
+        return max(0.0, min(1.0, c))
     except Exception as e:
-        print(f"Confidence Error: {e}")
-        return {"score": 0.5, "rationale": "Auditor failed to verify response."}
+        print(f"Confidence calculation error: {e}")
+        return 0.5 # Safe fallback
