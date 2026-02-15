@@ -1,69 +1,48 @@
+# clarifier.py
 import json
-from openai import OpenAI
-from models import SQL_INVESTIGATION
 from config import OPENAI_MODEL
 
-CLARIFIER_SYSTEM_PROMPT = """
-You decide whether clarification is required BEFORE analysis.
+CLARIFIER_PROMPT = """
+You are a "Clarification Engine".
+Your job is to decide if a request is clear enough to proceed.
 
-Inputs:
-- user_question
-- detected_intents
-- dataset_schema (may be null)
+### CRITICAL RULES:
 
-Rules:
-- If SQL_INVESTIGATION is present and dataset_schema is null, MUST require clarification.
-- If time windows are vague ("last quarter", "recent", "this month"), ask for exact definition.
-- If key metrics are undefined ("churn", "engagement", "conversion"), ask how they are defined.
+1. **THE "NO DATA" GATE**
+   - IF `Schema` is "No Schema Provided" AND the intent implies data analysis:
+   - **RETURN `needs_clarification: true`.**
+   - Question: "I cannot run an analysis because no dataset has been uploaded. Please upload a CSV file."
 
-Output STRICT JSON only:
-{
-  "needs_clarification": true/false,
-  "questions": ["...", "..."]
-}
-No markdown. No extra text.
-""".strip()
+2. **SMART INFERENCE (Do Not Ask)**
+   - IF the user mentions "churn" and you see `status='churned'` in the schema -> **Proceed.**
+   - IF the user asks for "Pro users" and you see `plan_type='Pro'` -> **Proceed.**
 
-def get_clarification(client: OpenAI, question: str, intents: list[str], schema):
-    payload = {
-        "user_question": question,
-        "detected_intents": intents,
-        "dataset_schema": schema,
-    }
+3. **GENUINE AMBIGUITY (Ask)**
+   - Only ask if a term has NO matching column or value.
 
-    resp = client.chat.completions.create(
-        model="gpt-4.0-mini",
-        messages=[
-            {"role": "system", "content": CLARIFIER_SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(payload)},
-        ],
-        temperature=0,
-    )
+### INPUT DATA:
+- Question: {question}
+- Schema: {schema}
 
-    raw = (resp.choices[0].message.content or "").strip()
+Output JSON: {{"needs_clarification": boolean, "questions": ["String"]}}
+"""
 
+def get_clarification(client, question, intents, schema=None):
     try:
-        result = json.loads(raw)
-        needs = bool(result.get("needs_clarification", False))
-        questions = result.get("questions", [])
-        if not isinstance(questions, list):
-            questions = []
-
-        # enforce server-side rule too
-        if (SQL_INVESTIGATION in intents) and (schema is None):
-            needs = True
-            if not questions:
-                questions = [
-                    "You asked for SQL—please upload a CSV dataset (or provide the schema: tables + columns) so I can generate grounded SQL."
-                ]
-
-        return {"needs_clarification": needs, "questions": questions[:3]}
+        schema_str = json.dumps(schema, indent=2) if schema else "No Schema Provided"
+        
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": CLARIFIER_PROMPT.format(
+                    question=question, 
+                    intents=str(intents), 
+                    schema=schema_str
+                )}
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
     except Exception:
-        fallback = []
-        if (SQL_INVESTIGATION in intents) and (schema is None):
-            fallback.append("You asked for SQL—please upload a CSV dataset (or provide tables + columns) so I can generate grounded SQL.")
-        fallback.extend([
-            "How is the key metric defined in your context (e.g., churn/engagement/conversion)—which column or rule should be used?",
-            "What exact time window should I use (exact start/end dates or calendar vs fiscal definition)?",
-        ])
-        return {"needs_clarification": True, "questions": fallback[:3]}
+        return {"needs_clarification": False}

@@ -1,16 +1,35 @@
+# router.py
 import json
-from config import OPENAI_MODEL  # <--- Ensure this import exists
+from config import OPENAI_MODEL
 from models import BUSINESS_STRATEGY, PRODUCT_ANALYTICS, SQL_INVESTIGATION
 
 ROUTER_PROMPT = """
 You are the Intent Classifier for an Analytics AI. 
-...
+Your job is to map a user's request to one or more specialized agents.
+
+### AVAILABLE AGENTS:
+1. **SQL_INVESTIGATION**: 
+   - Keywords: "calculate", "count", "list", "show", "query", "pull", "how many", "average", "sum".
+   - Trigger: ANY request that requires retrieving or aggregating raw numbers from a database. 
+   - **CRITICAL:** If the user asks for a number (e.g. "Calculate MRR"), you MUST include this intent.
+
+2. **PRODUCT_ANALYTICS**:
+   - Keywords: "churn", "retention", "behavior", "usage", "funnel", "cohort", "engagement".
+   - Trigger: Questions about user behavior, product performance, or specific metrics.
+
+3. **BUSINESS_STRATEGY**:
+   - Keywords: "impact", "why", "suggest", "plan", "campaign", "revenue", "advice".
+   - Trigger: High-level business questions, marketing ideas, or requests for qualitative advice.
+
+### INSTRUCTIONS:
+- You can and SHOULD return multiple intents.
+- Output JSON: {"intents": ["INTENT_NAME", ...]}
 """
 
 def classify_intent(client, question: str):
     try:
         response = client.chat.completions.create(
-            model=OPENAI_MODEL,  # <--- Uses the variable from config.py
+            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": ROUTER_PROMPT},
                 {"role": "user", "content": question}

@@ -1,58 +1,29 @@
-from openai import OpenAI
+# gatekeeper.py
 import json
+from config import OPENAI_MODEL
 
-SYSTEM_PROMPT = """
-You are a strict Gatekeeper for an Enterprise Data Analytics AI.
-Your job is to filter user queries.
+GATEKEEPER_PROMPT = """
+You are a Content Safety Filter.
+Your job is to screen user inputs for OFF_TOPIC or AMBIGUOUS content.
 
-Classify the user input into one of three statuses:
+1. **OFF_TOPIC**: Requests unrelated to data analytics, business, SQL, or python. (e.g. "Write a poem", "Code snake game").
+2. **AMBIGUOUS**: Single words like "Why?" or "How?" with no context.
+3. **VALID**: Any data-related request.
 
-1. **VALID**: 
-   - Criteria: Questions about data analytics, SQL, business strategy, metrics, Python for data, or CSV analysis.
-   - Message: null
-
-2. **AMBIGUOUS**:
-   - Criteria: Relevant business keywords but too vague (e.g., "It's broken", "Why is it down?", "Fix it").
-   - Message: "Please provide specific details about the metric, report, or table you are referring to."
-
-3. **OFF_TOPIC**:
-   - Criteria: ANYTHING not related to Data Analytics or Business Strategy.
-   - **Instruction for Message**: You MUST return a specific refusal string based on the category:
-     - **Creative Writing**: "I cannot generate creative writing, poetry, songs, or fiction."
-     - **General Coding**: "I only write Python for data analysis, not general application development or games."
-     - **General Knowledge**: "I am specialized in Data Analytics. I cannot answer general trivia or history questions."
-     - **Personal/Medical/Legal**: "I cannot provide personal, medical, or legal advice."
-     - **Gibberish/Noise**: "This input appears to be unintelligible. Please ask a valid data analytics question."
-     - **Everything Else**: "I am designed strictly for Business Data Analytics / SQL Investigation and cannot assist with this request."
-
-Output Format (JSON):
-{
-    "status": "VALID" | "AMBIGUOUS" | "OFF_TOPIC",
-    "message": "The specific refusal string."
-}
+Output JSON: {"status": "VALID" | "OFF_TOPIC" | "AMBIGUOUS", "message": "Reason"}
 """
 
-def check_ambiguity(client: OpenAI, question: str):
+def check_ambiguity(client, question: str):
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": question},
+                {"role": "system", "content": GATEKEEPER_PROMPT},
+                {"role": "user", "content": question}
             ],
-            temperature=0,
+            temperature=0.0,
             response_format={"type": "json_object"}
         )
-        result = json.loads(resp.choices[0].message.content)
-        
-        # --- SAFETY NET ---
-        # If the LLM marks it OFF_TOPIC but forgets the message, force a default.
-        if result.get("status") == "OFF_TOPIC":
-            if not result.get("message") or result["message"].strip() == "":
-                result["message"] = "I am designed strictly for Business Data Analytics and cannot assist with this request."
-        
-        return result
-        
-    except Exception:
-        # Fallback if JSON breaks: Allow it through (Better to allow than block valid queries on error)
-        return {"status": "VALID", "message": None}
+        return json.loads(response.choices[0].message.content)
+    except:
+        return {"status": "VALID"}
