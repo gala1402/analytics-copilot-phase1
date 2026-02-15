@@ -1,44 +1,33 @@
-# router.py
-import json
-from config import OPENAI_MODEL
-from models import BUSINESS_STRATEGY, PRODUCT_ANALYTICS, SQL_INVESTIGATION
+from openai import OpenAI
+from models import ALL_INTENTS, PRODUCT_ANALYTICS
 
-ROUTER_PROMPT = """
-You are the Intent Classifier for an Analytics AI. 
-Your job is to map a user's request to one or more specialized agents.
+SYSTEM_PROMPT = f"""
+Classify the user's analytics question into one or more intents from:
+{", ".join(ALL_INTENTS)}.
 
-### AVAILABLE AGENTS:
-1. **SQL_INVESTIGATION**: 
-   - Keywords: "calculate", "count", "list", "show", "query", "pull", "how many", "average", "sum".
-   - Trigger: ANY request that requires retrieving or aggregating raw numbers from a database. 
-   - **CRITICAL:** If the user asks for a number (e.g. "Calculate MRR"), you MUST include this intent.
+If the request is unrelated to business, data, or analytics, return 'OUT_OF_SCOPE'.
 
-2. **PRODUCT_ANALYTICS**:
-   - Keywords: "churn", "retention", "behavior", "usage", "funnel", "cohort", "engagement".
-   - Trigger: Questions about user behavior, product performance, or specific metrics.
+Guidance:
+- BUSINESS_STRATEGY: Strategy, ROI, unit economics, KPI tradeoffs.
+- PRODUCT_ANALYTICS: Funnels, cohorts, segmentation, experiment design.
+- SQL_INVESTIGATION: Specific requests for database queries/code.
+- VISUALIZATION: Requests for charts, graphs, or visual trends.
 
-3. **BUSINESS_STRATEGY**:
-   - Keywords: "impact", "why", "suggest", "plan", "campaign", "revenue", "advice".
-   - Trigger: High-level business questions, marketing ideas, or requests for qualitative advice.
+Return ONLY a comma-separated list of labels. No extra text.
+""".strip()
 
-### INSTRUCTIONS:
-- You can and SHOULD return multiple intents.
-- Output JSON: {"intents": ["INTENT_NAME", ...]}
-"""
-
-def classify_intent(client, question: str):
-    try:
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": ROUTER_PROMPT},
-                {"role": "user", "content": question}
-            ],
-            temperature=0.0,
-            response_format={"type": "json_object"}
-        )
-        data = json.loads(response.choices[0].message.content)
-        return data.get("intents", [])
-    except Exception as e:
-        print(f"Router Error: {e}")
-        return [BUSINESS_STRATEGY]
+def classify_intent(client: OpenAI, question: str):
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": question.strip()},
+        ],
+        temperature=0,
+    )
+    raw = (resp.choices[0].message.content or "").strip().upper()
+    if "OUT_OF_SCOPE" in raw:
+        return ["OUT_OF_SCOPE"]
+        
+    intents = [i.strip() for i in raw.split(",") if i.strip() in ALL_INTENTS]
+    return intents or [PRODUCT_ANALYTICS]

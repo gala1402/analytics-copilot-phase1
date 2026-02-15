@@ -1,48 +1,34 @@
-# clarifier.py
 import json
-from config import OPENAI_MODEL
+from openai import OpenAI
+from models import SQL_INVESTIGATION, VISUALIZATION
 
-CLARIFIER_PROMPT = """
-You are a "Clarification Engine".
-Your job is to decide if a request is clear enough to proceed.
+CLARIFIER_SYSTEM_PROMPT = """
+Decide if clarification is needed BEFORE analysis.
+Rules:
+1. If SQL_INVESTIGATION or VISUALIZATION is requested but schema is null, MUST ask for data.
+2. If metrics like "churn" or "engagement" are used without definition, ask for the rule.
+3. If the time window is vague, ask for specific dates.
 
-### CRITICAL RULES:
-
-1. **THE "NO DATA" GATE**
-   - IF `Schema` is "No Schema Provided" AND the intent implies data analysis:
-   - **RETURN `needs_clarification: true`.**
-   - Question: "I cannot run an analysis because no dataset has been uploaded. Please upload a CSV file."
-
-2. **SMART INFERENCE (Do Not Ask)**
-   - IF the user mentions "churn" and you see `status='churned'` in the schema -> **Proceed.**
-   - IF the user asks for "Pro users" and you see `plan_type='Pro'` -> **Proceed.**
-
-3. **GENUINE AMBIGUITY (Ask)**
-   - Only ask if a term has NO matching column or value.
-
-### INPUT DATA:
-- Question: {question}
-- Schema: {schema}
-
-Output JSON: {{"needs_clarification": boolean, "questions": ["String"]}}
+Output STRICT JSON:
+{"needs_clarification": true/false, "questions": ["...", "..."]}
 """
 
-def get_clarification(client, question, intents, schema=None):
+def get_clarification(client: OpenAI, question: str, intents: list[str], schema):
+    payload = {"user_question": question, "intents": intents, "schema": schema}
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": CLARIFIER_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(payload)},
+        ],
+        temperature=0,
+    )
     try:
-        schema_str = json.dumps(schema, indent=2) if schema else "No Schema Provided"
-        
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": CLARIFIER_PROMPT.format(
-                    question=question, 
-                    intents=str(intents), 
-                    schema=schema_str
-                )}
-            ],
-            temperature=0.0,
-            response_format={"type": "json_object"}
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception:
-        return {"needs_clarification": False}
+        result = json.loads(resp.choices[0].message.content)
+        # Force clarification if data-dependent intents are present without a schema
+        if (SQL_INVESTIGATION in intents or VISUALIZATION in intents) and schema is None:
+            result["needs_clarification"] = True
+            result["questions"].append("Please upload a CSV file so I can access the data columns.")
+        return result
+    except:
+        return {"needs_clarification": False, "questions": []}
