@@ -18,7 +18,7 @@ If unsure, return {PRODUCT_ANALYTICS}.
 
 def classify_intent(client: OpenAI, question: str):
     resp = client.chat.completions.create(
-        model="gpt-4.0-mini",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": question.strip()},

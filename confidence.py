@@ -20,7 +20,7 @@ Return STRICT JSON only:
 
 def get_confidence(client: OpenAI, output: str) -> dict:
     resp = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": CONF_SYSTEM},
             {"role": "user", "content": output[:7000]},
