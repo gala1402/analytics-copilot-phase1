@@ -1,7 +1,9 @@
 GATEKEEP_SCHEMA = """
 {
   "decision": "PROCEED|ASK|REFUSE",
+  "blocking": true,
   "reason": "string",
+  "message": "string",
   "questions": ["string"]
 }
 """
