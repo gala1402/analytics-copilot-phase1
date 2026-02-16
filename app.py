@@ -74,16 +74,6 @@ if st.button("Run"):
             st.experimental_rerun()
         st.stop()
 
-    # SOFT (non-blocking)
-    if clarification["soft_questions"]:
-        st.info("Optional context that could improve answer:")
-        for q in clarification["soft_questions"]:
-            st.write("- ", q)
-
-        optional_input = st.text_area("Optional additional context:")
-        if st.button("Add optional context"):
-            store_definition("optional_context", optional_input)
-            st.experimental_rerun()
 
     # 4️⃣ Execute
     results = execute_tasks(llm, plan["tasks"], df_summary)
