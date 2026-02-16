@@ -10,16 +10,28 @@ from clarifier import get_clarification
 from confidence import get_confidence
 from data_utils import load_csv, summarize_df
 
-from prompts.business import build_business_prompt
-from prompts.product import build_product_prompt
-from prompts.sql import build_sql_prompt
-from prompts.viz import build_viz_prompt
+# UI Config
+st.set_page_config(page_title="Analytics Copilot P2", layout="wide", page_icon="🧠")
 
-from validators.business_validator import validate_business
-from validators.product_validator import validate_product
-from validators.sql_validator import validate_sql
-
-st.set_page_config(page_title="Analytics Copilot P2", layout="wide", page_icon="📊")
+# --- Onboarding & Capability Helper ---
+def show_capabilities():
+    st.info("### 🛠️ Interactive Analytics Copilot Capabilities")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **What I Can Do:**
+        * **Strategic Framing**: Unit economics & KPI tradeoffs.
+        * **Product Insights**: Funnels, cohorts, and experiments.
+        * **Grounded SQL**: Database queries based on your actual CSV.
+        * **Smart Viz**: Choosing the right chart for your data trends.
+        """)
+    with col2:
+        st.markdown("""
+        **My Limitations:**
+        * **Fail-Closed**: I won't guess your data. No CSV = No SQL/Viz.
+        * **Clarification Gate**: I'll stop to ask for definitions if vague.
+        * **Analytical Scope**: I handle business & data only. No general chat.
+        """)
 
 # --- Sidebar ---
 with st.sidebar:
@@ -34,109 +46,56 @@ with st.sidebar:
         schema = summarize_df(df)
         st.success(f"✅ Data Active: {uploaded_file.name}")
 
-    if st.button("🗑️ Reset Session"):
-        for key in list(st.session_state.keys()): del st.session_state[key]
-        st.rerun()
-
 if not api_key:
-    st.info("Please enter your API Key to unlock the Copilot.")
+    st.info("Please enter your API Key to start.")
     st.stop()
 
 client = OpenAI(api_key=api_key)
 
+# --- App State ---
 if "step" not in st.session_state: st.session_state.step = "input"
-if "question" not in st.session_state: st.session_state.question = ""
-if "context" not in st.session_state: st.session_state.context = ""
 
-# --- Workflow ---
-
+# --- Main Logic ---
 if st.session_state.step == "input":
-    st.title("🧠 Analytics Copilot – Phase 2")
-    q = st.text_area("What is your inquiry?")
-    if st.button("Initialize Analysis", type="primary"):
-        st.session_state.question = q
+    st.title("🧠 Analytics Copilot")
+    show_capabilities()
+    
+    q = st.text_area("How can I help with your data today?", placeholder="e.g., Visualize our revenue trend...")
+    
+    if st.button("Process Request", type="primary"):
         intents = classify_intent(client, q)
+        
         if "OUT_OF_SCOPE" in intents:
-            st.error("Out of scope.")
+            st.error("🚫 **Out of Scope**: I'm a specialized analytics partner. I cannot assist with general topics like recipes or travel. Please ask an analytics or business-related question.")
+        elif "CAPABILITIES" in intents:
+            st.toast("Re-displaying capabilities...")
+            st.rerun()
         else:
+            st.session_state.question = q
             st.session_state.intents = intents
             gate = get_clarification(client, q, intents, schema)
+            
             if gate.get("needs_clarification"):
                 st.session_state.questions = gate.get("questions")
                 st.session_state.step = "clarify"
+                st.rerun()
             else:
                 st.session_state.step = "generate"
-            st.rerun()
+                st.rerun()
 
 elif st.session_state.step == "clarify":
-    st.header("🔍 Clarifying Context")
-    with st.form("clarify_form"):
-        ans_list = [st.text_input(cq) for cq in st.session_state.questions]
-        if st.form_submit_button("Proceed"):
-            st.session_state.context = " | ".join(ans_list)
+    st.header("🔍 Targeted Clarifications")
+    st.write("To ensure high integrity, I need you to define these aspects before I analyze:")
+    with st.form("clarification_form"):
+        ans = [st.text_input(q) for q in st.session_state.questions]
+        if st.form_submit_button("Generate Grounded Analysis"):
+            st.session_state.context = " | ".join(ans)
             st.session_state.step = "generate"
             st.rerun()
 
 elif st.session_state.step == "generate":
-    st.subheader(f"Analysis: {st.session_state.question}")
-    tabs = st.tabs([i.replace("_", " ").title() for i in st.session_state.intents])
-    
-    for idx, intent in enumerate(st.session_state.intents):
-        with tabs[idx]:
-            # Prompt Selection Logic
-            if intent == BUSINESS_STRATEGY:
-                p, v = build_business_prompt(st.session_state.question, schema, st.session_state.context), validate_business
-            elif intent == PRODUCT_ANALYTICS:
-                p, v = build_product_prompt(st.session_state.question, schema, st.session_state.context), validate_product
-            elif intent == SQL_INVESTIGATION:
-                if not schema: st.warning("Upload CSV for SQL."); continue
-                p, v = build_sql_prompt(st.session_state.question, schema, st.session_state.context), validate_sql
-            elif intent == VISUALIZATION:
-                if df is None: st.warning("Upload CSV to visualize."); continue
-                p, v = build_viz_prompt(st.session_state.question, schema, df.head(3).to_dict()), None
-            
-            with st.spinner(f"Processing {intent}..."):
-                resp = client.chat.completions.create(model=OPENAI_MODEL, messages=[{"role": "user", "content": p}], temperature=0)
-                content = resp.choices[0].message.content
-
-                # FIX: Ensure content exists before proceeding
-                if content:
-                    if intent == VISUALIZATION:
-                        # --- Inside the VISUALIZATION intent block in app.py ---
-                                try:
-                                    # Remove fig.show() if the LLM adds it, as it breaks Streamlit flow
-                                    code = content.split("```python")[1].split("```")[0].strip()
-                                    code = code.replace("fig.show()", "# fig.show() handled by streamlit")
-                                    
-                                    st.code(code, language="python")
-                                    
-                                    # Pre-processing: Ensure dates are datetime objects for better plotting
-                                    if 'Date' in df.columns:
-                                        df['Date'] = pd.to_datetime(df['Date'])
-
-                                    local_vars = {"df": df, "px": px, "pd": pd, "st": st}
-                                    exec(code, {}, local_vars)
-                                    
-                                    # Intelligent Capture: find any plotly figure object created in the code
-                                    fig = local_vars.get("fig")
-                                    if fig:
-                                        st.plotly_chart(fig, use_container_width=True)
-                                    else:
-                                        st.warning("Code executed but no 'fig' object was found to display.")
-                                        
-                                except Exception as e:
-                                    st.error(f"Visualization Error: {e}")
-                    else:
-                        # FIX: This is where line 142 was crashing
-                        conf = get_confidence(client, content)
-                        st.metric("Confidence Score", f"{int(conf*100)}%")
-                        st.markdown(content)
-                        if v:
-                            is_valid, msg = v(content)
-                            if not is_valid: st.caption(f"💡 Recommendation: {msg}")
-                else:
-                    st.error("No content generated by the model.")
-
+    # (Existing Generation Logic from the previous step goes here)
+    # Ensure it ends with a 'New Inquiry' button to reset st.session_state.step to 'input'
     if st.button("Start New Inquiry"):
         st.session_state.step = "input"
         st.rerun()
