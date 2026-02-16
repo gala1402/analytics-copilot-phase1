@@ -1,101 +1,227 @@
 import streamlit as st
 from openai import OpenAI
-import pandas as pd
-import plotly.express as px
 
 from config import OPENAI_MODEL, CONFIDENCE_THRESHOLD
-from models import BUSINESS_STRATEGY, PRODUCT_ANALYTICS, SQL_INVESTIGATION, VISUALIZATION
+from models import BUSINESS_STRATEGY, PRODUCT_ANALYTICS, SQL_INVESTIGATION
 from router import classify_intent
 from clarifier import get_clarification
 from confidence import get_confidence
 from data_utils import load_csv, summarize_df
 
-# UI Config
-st.set_page_config(page_title="Analytics Copilot P2", layout="wide", page_icon="🧠")
+from prompts.business import build_business_prompt
+from prompts.product import build_product_prompt
+from prompts.sql import build_sql_prompt
 
-# --- Onboarding & Capability Helper ---
-def show_capabilities():
-    st.info("### 🛠️ Interactive Analytics Copilot Capabilities")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        **What I Can Do:**
-        * **Strategic Framing**: Unit economics & KPI tradeoffs.
-        * **Product Insights**: Funnels, cohorts, and experiments.
-        * **Grounded SQL**: Database queries based on your actual CSV.
-        * **Smart Viz**: Choosing the right chart for your data trends.
-        """)
-    with col2:
-        st.markdown("""
-        **My Limitations:**
-        * **Fail-Closed**: I won't guess your data. No CSV = No SQL/Viz.
-        * **Clarification Gate**: I'll stop to ask for definitions if vague.
-        * **Analytical Scope**: I handle business & data only. No general chat.
-        """)
+from validators.business_validator import validate_business
+from validators.product_validator import validate_product
+from validators.sql_validator import validate_sql
 
-# --- Sidebar ---
-with st.sidebar:
-    st.title("⚙️ Control Panel")
-    api_key = st.secrets.get("OPENAI_API_KEY") or st.text_input("OpenAI API Key", type="password")
-    uploaded_file = st.file_uploader("Upload Dataset (CSV)", type="csv")
-    
-    schema = None
-    df = None
-    if uploaded_file:
-        df = load_csv(uploaded_file)
-        schema = summarize_df(df)
-        st.success(f"✅ Data Active: {uploaded_file.name}")
+
+# ----------------------------
+# Helpers
+# ----------------------------
+def confidence_label(conf: float) -> str:
+    if conf >= 0.85:
+        return "High"
+    if conf >= 0.70:
+        return "Medium"
+    return "Low"
+
+
+# ----------------------------
+# Page config
+# ----------------------------
+st.set_page_config(page_title="Analytics Copilot – Phase 1", layout="centered")
+st.title("🧠 Analytics Copilot – Phase 1")
+st.caption("Multi-intent, schema-aware analytics copilot with clarification gating + per-intent confidence.")
+
+
+# ----------------------------
+# API key resolution (secrets first, then env)
+# ----------------------------
+api_key = None
+try:
+    api_key = st.secrets.get("OPENAI_API_KEY")
+except Exception:
+    api_key = None
 
 if not api_key:
-    st.info("Please enter your API Key to start.")
+    import os
+    api_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    st.error("Missing OPENAI_API_KEY. Add it to .streamlit/secrets.toml or set env var OPENAI_API_KEY.")
     st.stop()
 
 client = OpenAI(api_key=api_key)
 
-# --- App State ---
-if "step" not in st.session_state: st.session_state.step = "input"
 
-# --- Main Logic ---
-if st.session_state.step == "input":
-    st.title("🧠 Analytics Copilot")
-    show_capabilities()
-    
-    q = st.text_area("How can I help with your data today?", placeholder="e.g., Visualize our revenue trend...")
-    
-    if st.button("Process Request", type="primary"):
-        intents = classify_intent(client, q)
-        
-        if "OUT_OF_SCOPE" in intents:
-            st.error("🚫 **Out of Scope**: I'm a specialized analytics partner. I cannot assist with general topics like recipes or travel. Please ask an analytics or business-related question.")
-        elif "CAPABILITIES" in intents:
-            st.toast("Re-displaying capabilities...")
-            st.rerun()
+# ----------------------------
+# Session state
+# ----------------------------
+if "clarification_answers" not in st.session_state:
+    st.session_state.clarification_answers = ""
+if "proceed_with_answers" not in st.session_state:
+    st.session_state.proceed_with_answers = False
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = ""
+if "run_pipeline_next" not in st.session_state:
+    st.session_state.run_pipeline_next = False
+
+
+# ----------------------------
+# Reset button (helps demos a lot)
+# ----------------------------
+if st.button("🔄 Reset session"):
+    st.session_state.pending_question = ""
+    st.session_state.clarification_answers = ""
+    st.session_state.proceed_with_answers = False
+    st.session_state.run_pipeline_next = False
+    st.rerun()
+
+
+# ----------------------------
+# Upload
+# ----------------------------
+uploaded_file = st.file_uploader("Upload a CSV dataset (optional)", type=["csv"])
+schema = None
+df = None
+
+if uploaded_file:
+    try:
+        df = load_csv(uploaded_file)
+        st.write("Data Preview", df.head())
+        schema = summarize_df(df)
+        st.write("Schema Summary", schema)
+    except Exception as e:
+        st.error(f"Error reading CSV: {e}")
+        st.stop()
+
+
+# ----------------------------
+# Main UI inputs
+# ----------------------------
+question = st.text_area("Ask your analytics question", value=st.session_state.pending_question)
+run = st.button("Analyze", key="analyze_btn")
+
+
+def run_pipeline(user_question: str):
+    intent_conf_map = {}
+
+    # 1) Intent classification
+    intents = classify_intent(client, user_question)
+    st.write("Detected intents:", intents)
+
+    # 2) Clarification gate
+    gate = get_clarification(client, user_question, intents, schema)
+
+    if gate.get("needs_clarification", False) and not st.session_state.proceed_with_answers:
+        st.info("🤔 Clarifying Questions")
+        for q in gate.get("questions", []):
+            st.write(f"- {q}")
+
+        st.session_state.clarification_answers = st.text_area(
+            "Answer the clarifying questions (then click 'Run with clarifications')",
+            value=st.session_state.clarification_answers,
+            height=120,
+            key="clarifications_box",
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("Run with clarifications", key="run_with_clarifications_btn"):
+                st.session_state.proceed_with_answers = True
+                st.session_state.run_pipeline_next = True
+                st.rerun()
+
+        with col2:
+            if st.button("Clear answers", key="clear_answers_btn"):
+                st.session_state.clarification_answers = ""
+                st.session_state.proceed_with_answers = False
+                st.session_state.run_pipeline_next = False
+                st.rerun()
+
+        st.stop()
+
+    user_context = st.session_state.clarification_answers.strip() or None
+    if user_context:
+        st.caption("Using your clarifications to refine the analysis.")
+
+    # 3) Generate outputs per intent
+    for intent in intents:
+        if intent == BUSINESS_STRATEGY:
+            prompt = build_business_prompt(user_question, schema=schema, user_context=user_context)
+            validator = validate_business
+
+        elif intent == PRODUCT_ANALYTICS:
+            prompt = build_product_prompt(user_question, schema=schema, user_context=user_context)
+            validator = validate_product
+
+        elif intent == SQL_INVESTIGATION:
+            if schema is None:
+                st.warning("SQL requires an uploaded dataset (schema). Upload CSV to proceed with SQL.")
+                continue
+            prompt = build_sql_prompt(user_question, schema=schema, user_context=user_context)
+            validator = validate_sql
+
         else:
-            st.session_state.question = q
-            st.session_state.intents = intents
-            gate = get_clarification(client, q, intents, schema)
-            
-            if gate.get("needs_clarification"):
-                st.session_state.questions = gate.get("questions")
-                st.session_state.step = "clarify"
-                st.rerun()
-            else:
-                st.session_state.step = "generate"
-                st.rerun()
+            continue
 
-elif st.session_state.step == "clarify":
-    st.header("🔍 Targeted Clarifications")
-    st.write("To ensure high integrity, I need you to define these aspects before I analyze:")
-    with st.form("clarification_form"):
-        ans = [st.text_input(q) for q in st.session_state.questions]
-        if st.form_submit_button("Generate Grounded Analysis"):
-            st.session_state.context = " | ".join(ans)
-            st.session_state.step = "generate"
-            st.rerun()
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
 
-elif st.session_state.step == "generate":
-    # (Existing Generation Logic from the previous step goes here)
-    # Ensure it ends with a 'New Inquiry' button to reset st.session_state.step to 'input'
-    if st.button("Start New Inquiry"):
-        st.session_state.step = "input"
-        st.rerun()
+        output = resp.choices[0].message.content or ""
+        
+        # New Confidence Logic (Object based)
+        conf_result = get_confidence(client, output)
+        score = conf_result["score"]
+        rationale = conf_result["rationale"]
+        
+        intent_conf_map[intent] = score
+
+        # Display per-intent confidence
+        st.subheader(intent.replace("_", " "))
+        label = confidence_label(score)
+        st.caption(f"Confidence: **{score:.2f} / 1.00** • {label}")
+        st.progress(score)
+        
+        with st.expander("Why this score?"):
+            st.write(rationale)
+
+        st.markdown(output)
+
+        is_valid, feedback = validator(output)
+        if not is_valid:
+            st.warning(feedback)
+
+        if score < CONFIDENCE_THRESHOLD:
+            st.warning(f"Low confidence ({score:.2f}). Consider refining the question or adding more context.")
+
+    # 4) Confidence summary
+    if intent_conf_map:
+        st.divider()
+        st.subheader("Overall Confidence Summary")
+        for i, c in intent_conf_map.items():
+            st.write(f"- {i.replace('_', ' ')}: {c:.2f}")
+
+    # 5) Reset flags
+    st.session_state.proceed_with_answers = False
+    st.session_state.run_pipeline_next = False
+
+
+# ----------------------------
+# Run logic
+# ----------------------------
+if run and question.strip():
+    # New question = fresh run (prevents Test2 → Test1 bleed)
+    st.session_state.pending_question = question.strip()
+    st.session_state.run_pipeline_next = True
+    st.session_state.proceed_with_answers = False
+    st.session_state.clarification_answers = ""
+
+if st.session_state.run_pipeline_next and st.session_state.pending_question:
+    run_pipeline(st.session_state.pending_question)
