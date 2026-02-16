@@ -7,18 +7,17 @@ def validate_business(output: str):
     split = re.split(r"\n\s*(note:|notes:|disclaimer:)\s*", low, maxsplit=1)
     core = split[0]
 
-    # Product analytics leakage (Refined)
-    # Don't ban "segment" entirely (business strategy uses "customer segments").
-    # Ban specific technical artifacts instead.
+    # Product analytics leakage
+    # Don't ban "segment" entirely; ban specific technical artifacts
     if re.search(r"\b(funnel breakdown|conversion funnel|cohort table|retention cohort|technical segmentation)\b", core):
         return False, "Business Strategy should not include technical funnels or cohort tables. Keep it strategy-focused."
 
-    # If they mention "funnel" in the context of specific dropoff steps, catch that.
     if "funnel" in core and "dropoff" in core:
          return False, "Business Strategy should not include specific funnel dropoff analysis."
 
-    # SQL leakage (actual SQL tokens)
-    if re.search(r"\b(select|with|from|join|group by|where)\b", core):
+    # SQL leakage (Fixed: Removed common words like 'from', 'where', 'join')
+    # Now looks for explicit SQL phrases
+    if re.search(r"\b(select\s+\*|select\s+top|group\s+by|order\s+by|inner\s+join|left\s+join|right\s+join)\b", core):
         return False, "Business Strategy should not include SQL or pseudo-SQL."
 
     # Ensure it includes measurable metrics
