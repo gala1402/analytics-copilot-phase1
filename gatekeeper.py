@@ -1,29 +1,18 @@
-# gatekeeper.py
-import json
-from config import OPENAI_MODEL
+from typing import Optional, Dict, Any
+from llm.client import LLMClient
+from llm.schemas import GATEKEEP_SCHEMA
+from prompts.gatekeeper import GATEKEEP_SYSTEM, gatekeep_user_prompt
 
-GATEKEEPER_PROMPT = """
-You are a Content Safety Filter.
-Your job is to screen user inputs for OFF_TOPIC or AMBIGUOUS content.
+def gatekeep(llm: LLMClient, user_input: str, df_summary: Optional[str] = None) -> Dict[str, Any]:
+    user = gatekeep_user_prompt(user_input, df_summary=df_summary)
+    out = llm.json(GATEKEEP_SYSTEM, user, schema_hint=GATEKEEP_SCHEMA)
 
-1. **OFF_TOPIC**: Requests unrelated to data analytics, business, SQL, or python. (e.g. "Write a poem", "Code snake game").
-2. **AMBIGUOUS**: Single words like "Why?" or "How?" with no context.
-3. **VALID**: Any data-related request.
-
-Output JSON: {"status": "VALID" | "OFF_TOPIC" | "AMBIGUOUS", "message": "Reason"}
-"""
-
-def check_ambiguity(client, question: str):
-    try:
-        response = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": GATEKEEPER_PROMPT},
-                {"role": "user", "content": question}
-            ],
-            temperature=0.0,
-            response_format={"type": "json_object"}
-        )
-        return json.loads(response.choices[0].message.content)
-    except:
-        return {"status": "VALID"}
+    # Basic sanitation/fallbacks
+    out.setdefault("questions", [])
+    out.setdefault("message", "")
+    out.setdefault("reason", "")
+    if out.get("decision") not in {"PROCEED", "ASK", "REFUSE"}:
+        out["decision"] = "ASK"
+        out["message"] = "I need you to rephrase that as an analytics question or request (SQL/pandas/business/product)."
+        out["questions"] = ["What outcome are you trying to achieve?", "What dataset/schema should I assume?"]
+    return out
